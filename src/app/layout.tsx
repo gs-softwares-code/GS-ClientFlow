@@ -19,6 +19,11 @@ export const metadata: Metadata = {
   description:
     "Multi-tenant CRM with registration, feedback, birthday automation, campaigns, loyalty, appointments, white-label branding and genuine analytics — built on an event-driven transactional outbox architecture.",
   keywords: ["CRM", "multi-tenant", "automation", "loyalty", "appointments", "GS ClientFlow"],
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+    apple: "/favicon.svg",
+  },
 };
 
 export default function RootLayout({
