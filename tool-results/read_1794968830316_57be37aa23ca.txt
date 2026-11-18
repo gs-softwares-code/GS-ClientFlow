@@ -1,0 +1,738 @@
+     1→"use client";
+     2→
+     3→import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+     4→import { Coins, Download, Ticket, Users } from "lucide-react";
+     5→
+     6→import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+     7→import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+     8→import { Badge } from "@/components/ui/badge";
+     9→import { Button } from "@/components/ui/button";
+    10→import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
+    11→import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+    12→import { Input } from "@/components/ui/input";
+    13→import { Label } from "@/components/ui/label";
+    14→import { Skeleton } from "@/components/ui/skeleton";
+    15→import { Switch } from "@/components/ui/switch";
+    16→import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+    17→import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+    18→import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+    19→import { useToast } from "@/hooks/use-toast";
+    20→import { apiGet, apiPatch, apiPost, downloadFile } from "@/lib/client/api";
+    21→import { formatDate, formatDateTime, formatINR, initials, timeAgo } from "@/lib/client/format";
+    22→import type { AppCtx, LoyaltyRules } from "@/lib/client/types";
+    23→
+    24→// ---------------------------------------------------------------------------
+    25→// Local DTOs (mirrors of GET /api/loyalty)
+    26→// ---------------------------------------------------------------------------
+    27→
+    28→type LoyaltyAccount = {
+    29→  id: string;
+    30→  name: string;
+    31→  email: string;
+    32→  pointsBalance: number;
+    33→  visitCount: number;
+    34→  totalSpendCents: number;
+    35→};
+    36→
+    37→type LoyaltyTransaction = {
+    38→  id: string;
+    39→  kind: string; // earn_visit | earn_feedback | earn_referral | earn_offer | redeem | adjust | expire | bonus
+    40→  points: number;
+    41→  reason: string;
+    42→  balanceAfter: number;
+    43→  idempotencyKey: string;
+    44→  createdAt: string;
+    45→  customer: { id: string; name: string };
+    46→};
+    47→
+    48→type LoyaltyReferral = {
+    49→  code: string;
+    50→  usesCount: number;
+    51→  customer: { id: string; name: string };
+    52→};
+    53→
+    54→type LoyaltyCoupon = {
+    55→  id: string;
+    56→  code: string;
+    57→  status: string; // active | redeemed | expired
+    58→  pointsCost: number | null;
+    59→  expiresAt: string | null;
+    60→  offer: { title: string } | null;
+    61→  customer: { name: string } | null;
+    62→};
+    63→
+    64→type LoyaltyPayload = {
+    65→  accounts: LoyaltyAccount[];
+    66→  transactions: LoyaltyTransaction[];
+    67→  referrals: LoyaltyReferral[];
+    68→  coupons: LoyaltyCoupon[];
+    69→  rules: LoyaltyRules;
+    70→  enabled: boolean;
+    71→};
+    72→
+    73→type RuleKey =
+    74→  | "pointsPerVisit"
+    75→  | "pointsPerFeedback"
+    76→  | "pointsPerReferral"
+    77→  | "pointsPerHundredRupees"
+    78→  | "referralBonus"
+    79→  | "redemptionMinimum";
+    80→
+    81→type RulesDraft = { enabled: boolean } & Record<RuleKey, string>;
+    82→
+    83→const RULE_FIELDS: { key: RuleKey; label: string; hint: string }[] = [
+    84→  { key: "pointsPerVisit", label: "Points per visit", hint: "Credited when a completed visit is logged." },
+    85→  { key: "pointsPerFeedback", label: "Points per feedback", hint: "Credited once per feedback response." },
+    86→  { key: "pointsPerReferral", label: "Points per referral", hint: "Credited to the referrer when their code is used." },
+    87→  { key: "pointsPerHundredRupees", label: "Points per ₹100 spent", hint: "Spend-linked earning on every logged visit." },
+    88→  { key: "referralBonus", label: "Referral welcome bonus", hint: "Welcome points for the newly referred customer." },
+    89→  { key: "redemptionMinimum", label: "Redemption minimum", hint: "Fewest points a single redemption can spend." },
+    90→];
+    91→
+    92→const EARN_KINDS: Record<string, string> = {
+    93→  earn_visit: "Visit",
+    94→  earn_feedback: "Feedback",
+    95→  earn_referral: "Referral",
+    96→  earn_offer: "Offer",
+    97→  bonus: "Bonus",
+    98→};
+    99→
+   100→/** Immutable update of a single numeric rule field (exhaustive, type-safe). */
+   101→function withRule(draft: RulesDraft, key: RuleKey, value: string): RulesDraft {
+   102→  switch (key) {
+   103→    case "pointsPerVisit":
+   104→      return { ...draft, pointsPerVisit: value };
+   105→    case "pointsPerFeedback":
+   106→      return { ...draft, pointsPerFeedback: value };
+   107→    case "pointsPerReferral":
+   108→      return { ...draft, pointsPerReferral: value };
+   109→    case "pointsPerHundredRupees":
+   110→      return { ...draft, pointsPerHundredRupees: value };
+   111→    case "referralBonus":
+   112→      return { ...draft, referralBonus: value };
+   113→    case "redemptionMinimum":
+   114→      return { ...draft, redemptionMinimum: value };
+   115→  }
+   116→}
+   117→
+   118→function kindLabel(kind: string): string {
+   119→  return EARN_KINDS[kind] ?? kind.replace(/_/g, " ");
+   120→}
+   121→
+   122→function kindBadge(kind: string): { variant: "secondary" | "outline"; className: string } {
+   123→  if (EARN_KINDS[kind]) return { variant: "outline", className: "border-emerald-600 bg-emerald-600/10 text-[10px] text-emerald-700" };
+   124→  if (kind === "redeem") return { variant: "outline", className: "border-rose-600 bg-rose-600/10 text-[10px] text-rose-700" };
+   125→  if (kind === "adjust") return { variant: "outline", className: "border-amber-600 bg-amber-600/10 text-[10px] text-amber-700" };
+   126→  return { variant: "secondary", className: "text-[10px]" };
+   127→}
+   128→
+   129→function couponBadge(status: string): { variant: "secondary" | "outline"; className: string } {
+   130→  if (status === "active") return { variant: "outline", className: "border-emerald-600 bg-emerald-600/10 text-[10px] text-emerald-700" };
+   131→  if (status === "expired") return { variant: "outline", className: "border-rose-600 bg-rose-600/10 text-[10px] text-rose-700" };
+   132→  return { variant: "secondary", className: "text-[10px] text-muted-foreground" };
+   133→}
+   134→
+   135→function KpiCard({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
+   136→  return (
+   137→    <Card className="gap-2 py-4">
+   138→      <CardContent className="flex items-center gap-3 px-4">
+   139→        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-[var(--brand)]/10">{icon}</span>
+   140→        <div className="min-w-0">
+   141→          <p className="text-xs text-muted-foreground">{label}</p>
+   142→          <p className="truncate text-lg font-semibold tabular-nums">{value}</p>
+   143→        </div>
+   144→      </CardContent>
+   145→    </Card>
+   146→  );
+   147→}
+   148→
+   149→// ---------------------------------------------------------------------------
+   150→// Main view — Members | Transactions | Referrals | Rules
+   151→// ---------------------------------------------------------------------------
+   152→
+   153→export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
+   154→  const { toast } = useToast();
+   155→
+   156→  const [data, setData] = useState<LoyaltyPayload | null>(null);
+   157→  const [loading, setLoading] = useState(true);
+   158→  const [loadError, setLoadError] = useState<string | null>(null);
+   159→  const [rulesDraft, setRulesDraft] = useState<RulesDraft | null>(null);
+   160→  const [savingRules, setSavingRules] = useState(false);
+   161→
+   162→  // Adjust dialog
+   163→  const [adjustTarget, setAdjustTarget] = useState<LoyaltyAccount | null>(null);
+   164→  const [adjustPoints, setAdjustPoints] = useState("");
+   165→  const [adjustReason, setAdjustReason] = useState("");
+   166→  // Redeem dialog
+   167→  const [redeemTarget, setRedeemTarget] = useState<LoyaltyAccount | null>(null);
+   168→  const [redeemPoints, setRedeemPoints] = useState("");
+   169→  const [dialogBusy, setDialogBusy] = useState(false);
+   170→
+   171→  const load = useCallback(async () => {
+   172→    setLoading(true);
+   173→    try {
+   174→      const payload = await apiGet<LoyaltyPayload>("/api/loyalty");
+   175→      setData(payload);
+   176→      setLoadError(null);
+   177→      setRulesDraft({
+   178→        pointsPerVisit: String(payload.rules.pointsPerVisit ?? 0),
+   179→        pointsPerFeedback: String(payload.rules.pointsPerFeedback ?? 0),
+   180→        pointsPerReferral: String(payload.rules.pointsPerReferral ?? 0),
+   181→        pointsPerHundredRupees: String(payload.rules.pointsPerHundredRupees ?? 0),
+   182→        referralBonus: String(payload.rules.referralBonus ?? 0),
+   183→        redemptionMinimum: String(payload.rules.redemptionMinimum ?? 0),
+   184→        enabled: payload.enabled,
+   185→      });
+   186→    } catch (err) {
+   187→      setLoadError((err as Error).message);
+   188→      toast({ title: "Could not load loyalty data", description: (err as Error).message, variant: "destructive" });
+   189→    } finally {
+   190→      setLoading(false);
+   191→    }
+   192→  }, [toast]);
+   193→
+   194→  useEffect(() => {
+   195→    void load();
+   196→  }, [load]);
+   197→
+   198→  const accounts = data?.accounts ?? [];
+   199→  const transactions = data?.transactions ?? [];
+   200→  const referrals = data?.referrals ?? [];
+   201→  const coupons = data?.coupons ?? [];
+   202→  const rules = data?.rules ?? ctx.tenant.settings.loyalty;
+   203→  const avgBalance = useMemo(
+   204→    () => (accounts.length ? Math.round(accounts.reduce((sum, a) => sum + a.pointsBalance, 0) / accounts.length) : 0),
+   205→    [accounts]
+   206→  );
+   207→
+   208→  const openAdjust = (a: LoyaltyAccount) => {
+   209→    setAdjustTarget(a);
+   210→    setAdjustPoints("");
+   211→    setAdjustReason("");
+   212→  };
+   213→
+   214→  const submitAdjust = async () => {
+   215→    if (!adjustTarget) return;
+   216→    const pts = Number(adjustPoints);
+   217→    if (!Number.isFinite(pts) || pts === 0) {
+   218→      toast({ title: "Enter a non-zero point amount", variant: "destructive" });
+   219→      return;
+   220→    }
+   221→    setDialogBusy(true);
+   222→    try {
+   223→      await apiPost("/api/loyalty", {
+   224→        action: "adjust",
+   225→        customerId: adjustTarget.id,
+   226→        points: pts,
+   227→        reason: adjustReason.trim() || undefined,
+   228→      });
+   229→      toast({ title: "Balance adjusted", description: `${pts > 0 ? "+" : ""}${pts} pts · ${adjustTarget.name}` });
+   230→      setAdjustTarget(null);
+   231→      await load();
+   232→    } catch (err) {
+   233→      toast({ title: "Adjustment failed", description: (err as Error).message, variant: "destructive" });
+   234→    } finally {
+   235→      setDialogBusy(false);
+   236→    }
+   237→  };
+   238→
+   239→  const submitRedeem = async () => {
+   240→    if (!redeemTarget) return;
+   241→    const pts = Number(redeemPoints);
+   242→    if (!Number.isFinite(pts) || pts <= 0) {
+   243→      toast({ title: "Enter points to redeem", variant: "destructive" });
+   244→      return;
+   245→    }
+   246→    setDialogBusy(true);
+   247→    try {
+   248→      const res = await apiPost<{ couponCode: string; balanceAfter: number; message: string }>("/api/loyalty", {
+   249→        action: "redeem",
+   250→        customerId: redeemTarget.id,
+   251→        points: pts,
+   252→      });
+   253→      toast({ title: "Points redeemed", description: res.message });
+   254→      setRedeemTarget(null);
+   255→      await load();
+   256→    } catch (err) {
+   257→      toast({ title: "Redemption failed", description: (err as Error).message, variant: "destructive" });
+   258→    } finally {
+   259→      setDialogBusy(false);
+   260→    }
+   261→  };
+   262→
+   263→  const saveRules = async () => {
+   264→    if (!rulesDraft) return;
+   265→    setSavingRules(true);
+   266→    try {
+   267→      await apiPatch("/api/tenant", {
+   268→        section: "loyaltyRules",
+   269→        patch: {
+   270→          pointsPerVisit: Number(rulesDraft.pointsPerVisit) || 0,
+   271→          pointsPerFeedback: Number(rulesDraft.pointsPerFeedback) || 0,
+   272→          pointsPerReferral: Number(rulesDraft.pointsPerReferral) || 0,
+   273→          pointsPerHundredRupees: Number(rulesDraft.pointsPerHundredRupees) || 0,
+   274→          referralBonus: Number(rulesDraft.referralBonus) || 0,
+   275→          redemptionMinimum: Number(rulesDraft.redemptionMinimum) || 0,
+   276→          enabled: rulesDraft.enabled,
+   277→        },
+   278→      });
+   279→      toast({ title: "Loyalty rules saved", description: "Applied to future events immediately." });
+   280→      await load();
+   281→    } catch (err) {
+   282→      toast({ title: "Could not save rules", description: (err as Error).message, variant: "destructive" });
+   283→    } finally {
+   284→      setSavingRules(false);
+   285→    }
+   286→  };
+   287→
+   288→  if (loading && !data) {
+   289→    return (
+   290→      <div className="space-y-4">
+   291→        <div className="space-y-2">
+   292→          <Skeleton className="h-8 w-64" />
+   293→          <Skeleton className="h-6 w-96 max-w-full" />
+   294→        </div>
+   295→        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+   296→          {[0, 1, 2].map((i) => (
+   297→            <Skeleton key={i} className="h-20 w-full rounded-xl" />
+   298→          ))}
+   299→        </div>
+   300→        <Skeleton className="h-80 w-full rounded-xl" />
+   301→      </div>
+   302→    );
+   303→  }
+   304→
+   305→  if (!data) {
+   306→    return (
+   307→      <Alert variant="destructive">
+   308→        <AlertTitle>Loyalty is unavailable</AlertTitle>
+   309→        <AlertDescription className="flex flex-wrap items-center gap-3">
+   310→          <span className="flex-1">{loadError ?? "Could not load loyalty data."}</span>
+   311→          <Button size="sm" variant="outline" className="h-9" onClick={() => void load()}>
+   312→            Retry
+   313→          </Button>
+   314→        </AlertDescription>
+   315→      </Alert>
+   316→    );
+   317→  }
+   318→
+   319→  return (
+   320→    <div className="space-y-4">
+   321→      {/* Header */}
+   322→      <div className="flex flex-wrap items-center gap-3">
+   323→        <h1 className="text-2xl font-semibold tracking-tight">Loyalty &amp; Rewards</h1>
+   324→        <Badge variant="outline" className="border-[var(--brand)] text-xs text-[var(--brand)]">
+   325→          {rules.pointsPerVisit} pts / visit · {rules.pointsPerFeedback} pts / feedback · {rules.pointsPerReferral} pts / referral
+   326→        </Badge>
+   327→        <div className="ml-auto flex flex-wrap items-center gap-2">
+   328→          <Button
+   329→            variant="outline"
+   330→            className="h-10 gap-1.5"
+   331→            onClick={() => downloadFile("/api/export/loyalty", `loyalty-${ctx.tenant.slug}.csv`)}
+   332→          >
+   333→            <Download className="h-4 w-4" /> Export ledger
+   334→          </Button>
+   335→        </div>
+   336→      </div>
+   337→
+   338→      <Tabs defaultValue="members" className="gap-4">
+   339→        <TabsList className="grid w-full grid-cols-4">
+   340→          <TabsTrigger value="members" className="flex-1">Members</TabsTrigger>
+   341→          <TabsTrigger value="transactions" className="flex-1">Transactions</TabsTrigger>
+   342→          <TabsTrigger value="referrals" className="flex-1">Referrals</TabsTrigger>
+   343→          <TabsTrigger value="rules" className="flex-1">Rules</TabsTrigger>
+   344→        </TabsList>
+   345→
+   346→        {/* ------------------------------------------------------------- Members */}
+   347→        <TabsContent value="members" className="space-y-4">
+   348→          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+   349→            <KpiCard icon={<Users className="h-5 w-5 text-[var(--brand)]" />} label="Active members" value={String(accounts.length)} />
+   350→            <KpiCard icon={<Coins className="h-5 w-5 text-[var(--brand)]" />} label="Average balance" value={`${avgBalance} pts`} />
+   351→            <KpiCard icon={<Ticket className="h-5 w-5 text-[var(--brand)]" />} label="Coupons issued" value={String(coupons.length)} />
+   352→          </div>
+   353→
+   354→          <Card className="gap-0">
+   355→            <CardHeader className="border-b py-4">
+   356→              <CardTitle className="text-base">Members</CardTitle>
+   357→              <CardDescription>Top point-holders — balances update as visit and feedback events land.</CardDescription>
+   358→            </CardHeader>
+   359→            <CardContent className="p-0">
+   360→              <div className="max-h-[420px] overflow-y-auto">
+   361→                {accounts.length ? (
+   362→                  <Table>
+   363→                    <TableHeader>
+   364→                      <TableRow>
+   365→                        <TableHead>Member</TableHead>
+   366→                        <TableHead className="text-right">Balance</TableHead>
+   367→                        <TableHead className="text-right">Visits</TableHead>
+   368→                        <TableHead className="hidden text-right sm:table-cell">Lifetime value</TableHead>
+   369→                        <TableHead className="text-right">Actions</TableHead>
+   370→                      </TableRow>
+   371→                    </TableHeader>
+   372→                    <TableBody>
+   373→                      {accounts.map((a) => (
+   374→                        <TableRow key={a.id}>
+   375→                          <TableCell>
+   376→                            <div className="flex items-center gap-3">
+   377→                              <Avatar className="h-9 w-9 shrink-0">
+   378→                                <AvatarFallback className="bg-[var(--brand)]/10 text-xs font-semibold text-[var(--brand)]">
+   379→                                  {initials(a.name)}
+   380→                                </AvatarFallback>
+   381→                              </Avatar>
+   382→                              <div className="min-w-0">
+   383→                                <p className="truncate text-sm font-medium">{a.name}</p>
+   384→                                <p className="truncate text-xs text-muted-foreground">{a.email}</p>
+   385→                              </div>
+   386→                            </div>
+   387→                          </TableCell>
+   388→                          <TableCell className="text-right font-semibold tabular-nums">{a.pointsBalance}</TableCell>
+   389→                          <TableCell className="text-right tabular-nums">{a.visitCount}</TableCell>
+   390→                          <TableCell className="hidden text-right font-medium tabular-nums sm:table-cell">
+   391→                            {formatINR(a.totalSpendCents)}
+   392→                          </TableCell>
+   393→                          <TableCell>
+   394→                            <div className="flex justify-end gap-2">
+   395→                              <Button variant="outline" size="sm" className="h-9" onClick={() => openAdjust(a)}>
+   396→                                Adjust
+   397→                              </Button>
+   398→                              <Button
+   399→                                variant="outline"
+   400→                                size="sm"
+   401→                                className="h-9"
+   402→                                onClick={() => {
+   403→                                  setRedeemTarget(a);
+   404→                                  setRedeemPoints("");
+   405→                                }}
+   406→                              >
+   407→                                Redeem
+   408→                              </Button>
+   409→                            </div>
+   410→                          </TableCell>
+   411→                        </TableRow>
+   412→                      ))}
+   413→                    </TableBody>
+   414→                  </Table>
+   415→                ) : (
+   416→                  <p className="py-12 text-center text-sm text-muted-foreground">
+   417→                    No loyalty members yet — members appear once customers start earning points.
+   418→                  </p>
+   419→                )}
+   420→              </div>
+   421→            </CardContent>
+   422→          </Card>
+   423→
+   424→          <Card className="gap-0">
+   425→            <CardHeader className="border-b py-4">
+   426→              <CardTitle className="text-base">Recent coupons</CardTitle>
+   427→              <CardDescription>Vouchers issued when members redeem points — valid for 90 days.</CardDescription>
+   428→            </CardHeader>
+   429→            <CardContent className="p-0">
+   430→              <div className="max-h-[280px] overflow-y-auto">
+   431→                {coupons.length ? (
+   432→                  <Table>
+   433→                    <TableHeader>
+   434→                      <TableRow>
+   435→                        <TableHead>Code</TableHead>
+   436→                        <TableHead>Offer</TableHead>
+   437→                        <TableHead className="hidden sm:table-cell">Customer</TableHead>
+   438→                        <TableHead className="text-right">Cost</TableHead>
+   439→                        <TableHead>Status</TableHead>
+   440→                        <TableHead className="hidden text-right md:table-cell">Expires</TableHead>
+   441→                      </TableRow>
+   442→                    </TableHeader>
+   443→                    <TableBody>
+   444→                      {coupons.map((c) => {
+   445→                        const badge = couponBadge(c.status);
+   446→                        return (
+   447→                          <TableRow key={c.id}>
+   448→                            <TableCell className="font-mono text-xs font-medium">{c.code}</TableCell>
+   449→                            <TableCell className="max-w-[180px] truncate text-sm">{c.offer?.title ?? "Points voucher"}</TableCell>
+   450→                            <TableCell className="hidden max-w-[140px] truncate text-sm sm:table-cell">{c.customer?.name ?? "—"}</TableCell>
+   451→                            <TableCell className="text-right tabular-nums">
+   452→                              {c.pointsCost === null ? "—" : `−${c.pointsCost} pts`}
+   453→                            </TableCell>
+   454→                            <TableCell>
+   455→                              <Badge variant={badge.variant} className={badge.className}>
+   456→                                {c.status}
+   457→                              </Badge>
+   458→                            </TableCell>
+   459→                            <TableCell className="hidden text-right text-xs text-muted-foreground md:table-cell">
+   460→                              {formatDate(c.expiresAt)}
+   461→                            </TableCell>
+   462→                          </TableRow>
+   463→                        );
+   464→                      })}
+   465→                    </TableBody>
+   466→                  </Table>
+   467→                ) : (
+   468→                  <p className="py-10 text-center text-sm text-muted-foreground">
+   469→                    No coupons yet — run a redemption from a member row above.
+   470→                  </p>
+   471→                )}
+   472→              </div>
+   473→            </CardContent>
+   474→          </Card>
+   475→        </TabsContent>
+   476→
+   477→        {/* -------------------------------------------------------- Transactions */}
+   478→        <TabsContent value="transactions" className="space-y-3">
+   479→          <p className="text-xs text-muted-foreground">
+   480→            Every credit is guarded by a unique idempotency key — duplicates are impossible by construction.
+   481→          </p>
+   482→          <Card className="gap-0">
+   483→            <CardHeader className="border-b py-4">
+   484→              <CardTitle className="text-base">Ledger — last {transactions.length} transactions</CardTitle>
+   485→            </CardHeader>
+   486→            <CardContent className="p-0">
+   487→              <div className="max-h-[420px] overflow-y-auto">
+   488→                {transactions.length ? (
+   489→                  <Table>
+   490→                    <TableHeader>
+   491→                      <TableRow>
+   492→                        <TableHead>Date</TableHead>
+   493→                        <TableHead>Customer</TableHead>
+   494→                        <TableHead>Kind</TableHead>
+   495→                        <TableHead className="text-right">Points</TableHead>
+   496→                        <TableHead className="text-right">Balance</TableHead>
+   497→                        <TableHead className="hidden md:table-cell">Reason</TableHead>
+   498→                        <TableHead className="hidden lg:table-cell">Key</TableHead>
+   499→                      </TableRow>
+   500→                    </TableHeader>
+   501→                    <TableBody>
+   502→                      {transactions.map((t) => {
+   503→                        const badge = kindBadge(t.kind);
+   504→                        return (
+   505→                          <TableRow key={t.id}>
+   506→                            <TableCell className="whitespace-nowrap">
+   507→                              <div className="text-sm">{formatDateTime(t.createdAt)}</div>
+   508→                              <div className="text-[10px] text-muted-foreground">{timeAgo(t.createdAt)}</div>
+   509→                            </TableCell>
+   510→                            <TableCell className="max-w-[140px] truncate text-sm">{t.customer.name}</TableCell>
+   511→                            <TableCell>
+   512→                              <Badge variant={badge.variant} className={badge.className}>
+   513→                                {kindLabel(t.kind)}
+   514→                              </Badge>
+   515→                            </TableCell>
+   516→                            <TableCell
+   517→                              className={`text-right font-semibold tabular-nums ${t.points >= 0 ? "text-emerald-700" : "text-rose-700"}`}
+   518→                            >
+   519→                              {t.points >= 0 ? `+${t.points}` : `${t.points}`}
+   520→                            </TableCell>
+   521→                            <TableCell className="text-right tabular-nums">{t.balanceAfter}</TableCell>
+   522→                            <TableCell className="hidden max-w-[200px] truncate text-xs text-muted-foreground md:table-cell">
+   523→                              {t.reason}
+   524→                            </TableCell>
+   525→                            <TableCell className="hidden lg:table-cell">
+   526→                              <Tooltip>
+   527→                                <TooltipTrigger asChild>
+   528→                                  <span className="block max-w-[110px] cursor-default truncate font-mono text-[10px] text-muted-foreground">
+   529→                                    {t.idempotencyKey}
+   530→                                  </span>
+   531→                                </TooltipTrigger>
+   532→                                <TooltipContent className="max-w-[260px] break-all font-mono text-[10px]">
+   533→                                  {t.idempotencyKey}
+   534→                                </TooltipContent>
+   535→                              </Tooltip>
+   536→                            </TableCell>
+   537→                          </TableRow>
+   538→                        );
+   539→                      })}
+   540→                    </TableBody>
+   541→                  </Table>
+   542→                ) : (
+   543→                  <p className="py-12 text-center text-sm text-muted-foreground">No loyalty activity yet.</p>
+   544→                )}
+   545→              </div>
+   546→            </CardContent>
+   547→          </Card>
+   548→        </TabsContent>
+   549→
+   550→        {/* ------------------------------------------------------------ Referrals */}
+   551→        <TabsContent value="referrals" className="space-y-4">
+   552→          <Card className="gap-0">
+   553→            <CardHeader className="border-b py-4">
+   554→              <CardTitle className="text-base">Referral codes</CardTitle>
+   555→              <CardDescription>Personal codes issued at registration, ranked by uses.</CardDescription>
+   556→            </CardHeader>
+   557→            <CardContent className="p-0">
+   558→              <div className="max-h-[420px] overflow-y-auto">
+   559→                {referrals.length ? (
+   560→                  <Table>
+   561→                    <TableHeader>
+   562→                      <TableRow>
+   563→                        <TableHead>Code</TableHead>
+   564→                        <TableHead>Referrer</TableHead>
+   565→                        <TableHead className="text-right">Uses</TableHead>
+   566→                      </TableRow>
+   567→                    </TableHeader>
+   568→                    <TableBody>
+   569→                      {referrals.map((r) => (
+   570→                        <TableRow key={r.code}>
+   571→                          <TableCell className="font-mono text-xs font-medium">{r.code}</TableCell>
+   572→                          <TableCell className="max-w-[220px] truncate text-sm">{r.customer.name}</TableCell>
+   573→                          <TableCell className="text-right tabular-nums">{r.usesCount}</TableCell>
+   574→                        </TableRow>
+   575→                      ))}
+   576→                    </TableBody>
+   577→                  </Table>
+   578→                ) : (
+   579→                  <p className="py-12 text-center text-sm text-muted-foreground">
+   580→                    No referral codes yet — codes are issued as customers register.
+   581→                  </p>
+   582→                )}
+   583→              </div>
+   584→            </CardContent>
+   585→          </Card>
+   586→
+   587→          <Card className="py-4">
+   588→            <CardContent className="px-4 sm:px-6">
+   589→              <p className="text-sm font-medium">How referrals work</p>
+   590→              <p className="mt-1 text-sm text-muted-foreground">
+   591→                Each customer gets a personal code at registration; new registrations citing it credit{" "}
+   592→                {rules.pointsPerReferral} pts to the referrer and a {rules.referralBonus} pts welcome bonus to the
+   593→                newcomer — exactly once each.
+   594→              </p>
+   595→            </CardContent>
+   596→          </Card>
+   597→        </TabsContent>
+   598→
+   599→        {/* --------------------------------------------------------------- Rules */}
+   600→        <TabsContent value="rules" className="space-y-4">
+   601→          <Card className="gap-0">
+   602→            <CardHeader className="border-b py-4">
+   603→              <CardTitle className="text-base">Earning &amp; redemption rules</CardTitle>
+   604→              <CardDescription>Tune how points are earned and spent across the workspace.</CardDescription>
+   605→            </CardHeader>
+   606→            <CardContent className="space-y-6 px-4 py-4 sm:px-6">
+   607→              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+   608→                {RULE_FIELDS.map((f) => (
+   609→                  <div key={f.key} className="space-y-1.5">
+   610→                    <Label htmlFor={`rule-${f.key}`}>{f.label}</Label>
+   611→                    <Input
+   612→                      id={`rule-${f.key}`}
+   613→                      type="number"
+   614→                      min={0}
+   615→                      className="h-10"
+   616→                      value={rulesDraft?.[f.key] ?? ""}
+   617→                      onChange={(e) => setRulesDraft((r) => (r ? withRule(r, f.key, e.target.value) : r))}
+   618→                    />
+   619→                    <p className="text-xs text-muted-foreground">{f.hint}</p>
+   620→                  </div>
+   621→                ))}
+   622→              </div>
+   623→              <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+   624→                <div className="min-w-0">
+   625→                  <p className="text-sm font-medium">Module active</p>
+   626→                  <p className="text-xs text-muted-foreground">Pause earning without touching existing balances.</p>
+   627→                </div>
+   628→                <Switch
+   629→                  checked={rulesDraft?.enabled ?? false}
+   630→                  onCheckedChange={(v) => setRulesDraft((r) => (r ? { ...r, enabled: v } : r))}
+   631→                  aria-label="Loyalty module active"
+   632→                />
+   633→              </div>
+   634→            </CardContent>
+   635→            <CardFooter className="justify-between border-t px-4 py-4 sm:px-6">
+   636→              <p className="text-xs text-muted-foreground">Applied to future events immediately.</p>
+   637→              <Button
+   638→                className="h-10 bg-[var(--brand)] text-white hover:opacity-90"
+   639→                disabled={savingRules || !rulesDraft}
+   640→                onClick={() => void saveRules()}
+   641→              >
+   642→                {savingRules ? "Saving…" : "Save rules"}
+   643→              </Button>
+   644→            </CardFooter>
+   645→          </Card>
+   646→        </TabsContent>
+   647→      </Tabs>
+   648→
+   649→      {/* Adjust dialog */}
+   650→      <Dialog open={!!adjustTarget} onOpenChange={(o) => !o && setAdjustTarget(null)}>
+   651→        <DialogContent className="sm:max-w-md">
+   652→          <DialogHeader>
+   653→            <DialogTitle>Adjust balance — {adjustTarget?.name}</DialogTitle>
+   654→            <DialogDescription>Manual correction for support cases; negative values claw points back.</DialogDescription>
+   655→          </DialogHeader>
+   656→          <div className="space-y-4">
+   657→            <div className="space-y-1.5">
+   658→              <Label htmlFor="adjust-points">Points (positive or negative)</Label>
+   659→              <Input
+   660→                id="adjust-points"
+   661→                type="number"
+   662→                className="h-10"
+   663→                placeholder="e.g. 50 or -25"
+   664→                value={adjustPoints}
+   665→                onChange={(e) => setAdjustPoints(e.target.value)}
+   666→              />
+   667→            </div>
+   668→            <div className="space-y-1.5">
+   669→              <Label htmlFor="adjust-reason">Reason</Label>
+   670→              <Input
+   671→                id="adjust-reason"
+   672→                className="h-10"
+   673→                placeholder="Goodwill — service delay"
+   674→                value={adjustReason}
+   675→                onChange={(e) => setAdjustReason(e.target.value)}
+   676→              />
+   677→            </div>
+   678→            <p className="text-xs text-muted-foreground">
+   679→              Current balance: <span className="font-semibold tabular-nums">{adjustTarget?.pointsBalance ?? 0} pts</span>
+   680→            </p>
+   681→          </div>
+   682→          <DialogFooter>
+   683→            <Button variant="outline" className="h-10" onClick={() => setAdjustTarget(null)}>
+   684→              Cancel
+   685→            </Button>
+   686→            <Button
+   687→              className="h-10 bg-[var(--brand)] text-white hover:opacity-90"
+   688→              disabled={dialogBusy}
+   689→              onClick={() => void submitAdjust()}
+   690→            >
+   691→              {dialogBusy ? "Applying…" : "Apply adjustment"}
+   692→            </Button>
+   693→          </DialogFooter>
+   694→        </DialogContent>
+   695→      </Dialog>
+   696→
+   697→      {/* Redeem dialog */}
+   698→      <Dialog open={!!redeemTarget} onOpenChange={(o) => !o && setRedeemTarget(null)}>
+   699→        <DialogContent className="sm:max-w-md">
+   700→          <DialogHeader>
+   701→            <DialogTitle>Redeem points — {redeemTarget?.name}</DialogTitle>
+   702→            <DialogDescription>Points convert into a voucher coupon the customer can use on their next visit.</DialogDescription>
+   703→          </DialogHeader>
+   704→          <div className="space-y-4">
+   705→            <div className="space-y-1.5">
+   706→              <Label htmlFor="redeem-points">Points to redeem</Label>
+   707→              <Input
+   708→                id="redeem-points"
+   709→                type="number"
+   710→                min={1}
+   711→                className="h-10"
+   712→                placeholder={`at least ${rules.redemptionMinimum}`}
+   713→                value={redeemPoints}
+   714→                onChange={(e) => setRedeemPoints(e.target.value)}
+   715→              />
+   716→              <p className="text-xs text-muted-foreground">
+   717→                Minimum redemption is {rules.redemptionMinimum} pts · current balance {redeemTarget?.pointsBalance ?? 0} pts.
+   718→              </p>
+   719→            </div>
+   720→          </div>
+   721→          <DialogFooter>
+   722→            <Button variant="outline" className="h-10" onClick={() => setRedeemTarget(null)}>
+   723→              Cancel
+   724→            </Button>
+   725→            <Button
+   726→              className="h-10 bg-[var(--brand)] text-white hover:opacity-90"
+   727→              disabled={dialogBusy}
+   728→              onClick={() => void submitRedeem()}
+   729→            >
+   730→              {dialogBusy ? "Redeeming…" : "Redeem points"}
+   731→            </Button>
+   732→          </DialogFooter>
+   733→        </DialogContent>
+   734→      </Dialog>
+   735→    </div>
+   736→  );
+   737→}
+   738→
