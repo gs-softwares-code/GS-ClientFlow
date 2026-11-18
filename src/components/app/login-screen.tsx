@@ -1,12 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { HeartPulse, LogIn, ShieldCheck, Workflow, Database, Palette } from "lucide-react";
+import { HeartPulse, LogIn, ShieldCheck, Workflow, Database, Palette, PlusCircle, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiPost } from "@/lib/client/api";
@@ -29,21 +30,73 @@ export function LoginScreen({
   const [slug, setSlug] = useState(tenants[0]?.slug ?? "aurora-spa");
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // New business form states
+  const [newBizName, setNewBizName] = useState("");
+  const [newBizSlug, setNewBizSlug] = useState("");
+  const [newBizCategory, setNewBizCategory] = useState("salon_spa");
+  const [newBizOwnerName, setNewBizOwnerName] = useState("");
+  const [newBizOwnerEmail, setNewBizOwnerEmail] = useState("");
+  const [newBizColor, setNewBizColor] = useState("#0f766e");
+
   const { toast } = useToast();
 
-  const submit = async () => {
+  const handleLogin = async () => {
     const chosen = email.trim().toLowerCase() || (DEMO_EMAILS[slug] ?? "");
     if (!chosen) {
-      toast({ title: "Enter a staff email", description: "Demo emails are listed next to the business selector.", variant: "destructive" });
+      toast({
+        title: "Enter a staff email",
+        description: "Demo emails are listed next to the business selector.",
+        variant: "destructive",
+      });
       return;
     }
     setBusy(true);
     try {
       await apiPost(`/api/auth/login?tenant=${slug}`, { email: chosen });
       await onLoggedIn();
-      toast({ title: "Signed in", description: `Session bound to ${slug} — every query is tenant-scoped from here on.` });
+      toast({
+        title: "Signed in",
+        description: `Session bound to ${slug} — every query is tenant-scoped from here on.`,
+      });
     } catch (err) {
       toast({ title: "Sign-in failed", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRegisterBusiness = async () => {
+    if (!newBizName.trim()) {
+      toast({ title: "Business name required", description: "Please enter your business or company name.", variant: "destructive" });
+      return;
+    }
+    if (!newBizSlug.trim()) {
+      toast({ title: "Subdomain slug required", description: "Please choose a subdomain identifier.", variant: "destructive" });
+      return;
+    }
+    if (!newBizOwnerName.trim() || !newBizOwnerEmail.trim()) {
+      toast({ title: "Owner details required", description: "Please provide your name and work email.", variant: "destructive" });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await apiPost("/api/auth/register-business", {
+        businessName: newBizName,
+        slug: newBizSlug,
+        category: newBizCategory,
+        ownerName: newBizOwnerName,
+        ownerEmail: newBizOwnerEmail,
+        brandColor: newBizColor,
+      });
+      await onLoggedIn();
+      toast({
+        title: "Business Created Successfully!",
+        description: `Welcome to GS ClientFlow. Your business workspace '${newBizName}' is live.`,
+      });
+    } catch (err) {
+      toast({ title: "Registration failed", description: (err as Error).message, variant: "destructive" });
     } finally {
       setBusy(false);
     }
@@ -102,70 +155,176 @@ export function LoginScreen({
           )}
         </div>
 
-        {/* Sign in */}
+        {/* Sign in & Sign up Tabs */}
         <Card className="max-w-md w-full justify-self-center lg:justify-self-end">
-          <CardHeader>
-            <CardTitle className="text-lg">Sign in to a business</CardTitle>
-            <CardDescription>
-              Demo environment — passwordless staff sign-in. The session cookie binds you to exactly one tenant.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="tenant">Business</Label>
-              <Select value={slug} onValueChange={(v) => { setSlug(v); setEmail(DEMO_EMAILS[v] ?? ""); }}>
-                <SelectTrigger id="tenant">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {tenants.map((t) => (
-                    <SelectItem key={t.slug} value={t.slug}>
-                      <span className="flex items-center gap-2">
-                        <span className="h-4 w-4 rounded grid place-items-center text-[9px] font-bold text-white" style={{ background: t.brandColor }}>
-                          {t.logoText}
-                        </span>
-                        {t.name}
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <div className="text-xs text-muted-foreground">
-                {selected ? `${selected.businessCategory.replace("_", " ")} · ${selected.plan} plan` : ""}
-              </div>
-            </div>
+          <Tabs defaultValue="login" className="w-full">
+            <CardHeader className="pb-3">
+              <TabsList className="grid grid-cols-2 w-full">
+                <TabsTrigger value="login" className="gap-1.5">
+                  <LogIn className="h-4 w-4" /> Sign In
+                </TabsTrigger>
+                <TabsTrigger value="register" className="gap-1.5">
+                  <Building2 className="h-4 w-4" /> Register Business
+                </TabsTrigger>
+              </TabsList>
+            </CardHeader>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Staff email</Label>
-              <Input
-                id="email"
-                type="email"
-                placeholder={DEMO_EMAILS[slug] ?? "you@example.com"}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submit()}
-              />
-              <div className="text-xs text-muted-foreground">
-                Demo accounts — {slug === "bright-dental" ? "dr.mehta@brightdental.example" : "priya@auroraspa.example"} (owner) ·
-                platform@gsclientflow.app (cross-tenant demo admin, Aurora)
-              </div>
-            </div>
+            {/* TAB 1: EXISTING BUSINESS LOGIN */}
+            <TabsContent value="login">
+              <CardContent className="space-y-4 pt-1">
+                <div className="space-y-2">
+                  <Label htmlFor="tenant">Business</Label>
+                  <Select value={slug} onValueChange={(v) => { setSlug(v); setEmail(DEMO_EMAILS[v] ?? ""); }}>
+                    <SelectTrigger id="tenant">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {tenants.map((t) => (
+                        <SelectItem key={t.slug} value={t.slug}>
+                          <span className="flex items-center gap-2">
+                            <span className="h-4 w-4 rounded grid place-items-center text-[9px] font-bold text-white" style={{ background: t.brandColor }}>
+                              {t.logoText}
+                            </span>
+                            {t.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">
+                    {selected ? `${selected.businessCategory.replace("_", " ")} · ${selected.plan} plan` : ""}
+                  </div>
+                </div>
 
-            <Button className="w-full gap-2" onClick={submit} disabled={busy}>
-              <LogIn className="h-4 w-4" />
-              {busy ? "Signing in…" : "Sign in"}
-            </Button>
-            <p className="text-[11px] text-muted-foreground">
-              Sandbox note: production deployments add password/SSO authentication in front of the same tenant-bound session layer.
-            </p>
-          </CardContent>
+                <div className="space-y-2">
+                  <Label htmlFor="email">Staff email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder={DEMO_EMAILS[slug] ?? "you@example.com"}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                  />
+                  <div className="text-xs text-muted-foreground">
+                    Demo accounts — {slug === "bright-dental" ? "dr.mehta@brightdental.example" : "priya@auroraspa.example"} (owner) ·
+                    platform@gsclientflow.app (cross-tenant demo admin, Aurora)
+                  </div>
+                </div>
+
+                <Button className="w-full gap-2" onClick={handleLogin} disabled={busy}>
+                  <LogIn className="h-4 w-4" />
+                  {busy ? "Signing in…" : "Sign in"}
+                </Button>
+                <p className="text-[11px] text-muted-foreground">
+                  Session cookie binds directly to this business tenant.
+                </p>
+              </CardContent>
+            </TabsContent>
+
+            {/* TAB 2: NEW BUSINESS SELF-SERVICE REGISTRATION */}
+            <TabsContent value="register">
+              <CardContent className="space-y-3.5 pt-1">
+                <div className="space-y-1.5">
+                  <Label htmlFor="bizName">Business Name</Label>
+                  <Input
+                    id="bizName"
+                    placeholder="e.g. Apex Physical Therapy"
+                    value={newBizName}
+                    onChange={(e) => {
+                      setNewBizName(e.target.value);
+                      if (!newBizSlug || newBizSlug === newBizName.toLowerCase().replace(/[^a-z0-9]/g, "-")) {
+                        setNewBizSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, "-").replace(/-+/g, "-"));
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bizSlug">Subdomain</Label>
+                    <Input
+                      id="bizSlug"
+                      placeholder="e.g. apex-pt"
+                      value={newBizSlug}
+                      onChange={(e) => setNewBizSlug(e.target.value)}
+                    />
+                    <span className="text-[10px] text-muted-foreground truncate block">
+                      .{newBizSlug || "slug"}.gsclientflow.app
+                    </span>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bizCat">Category</Label>
+                    <Select value={newBizCategory} onValueChange={setNewBizCategory}>
+                      <SelectTrigger id="bizCat">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="salon_spa">Salon &amp; Spa</SelectItem>
+                        <SelectItem value="dental">Dental Practice</SelectItem>
+                        <SelectItem value="clinic">Medical Clinic</SelectItem>
+                        <SelectItem value="retail">Boutique &amp; Retail</SelectItem>
+                        <SelectItem value="food">Restaurant / Food</SelectItem>
+                        <SelectItem value="services">Professional Services</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ownerName">Owner Name</Label>
+                    <Input
+                      id="ownerName"
+                      placeholder="Jane Doe"
+                      value={newBizOwnerName}
+                      onChange={(e) => setNewBizOwnerName(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="bizColor">Brand Color</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        id="bizColor"
+                        value={newBizColor}
+                        onChange={(e) => setNewBizColor(e.target.value)}
+                        className="h-9 w-10 p-0 rounded border cursor-pointer bg-transparent"
+                      />
+                      <span className="font-mono text-xs">{newBizColor}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label htmlFor="ownerEmail">Owner Work Email</Label>
+                  <Input
+                    id="ownerEmail"
+                    type="email"
+                    placeholder="jane@apexpt.com"
+                    value={newBizOwnerEmail}
+                    onChange={(e) => setNewBizOwnerEmail(e.target.value)}
+                  />
+                </div>
+
+                <Button className="w-full gap-2 mt-2" onClick={handleRegisterBusiness} disabled={busy}>
+                  <PlusCircle className="h-4 w-4" />
+                  {busy ? "Creating Business…" : "Create & Launch Business"}
+                </Button>
+                <p className="text-[11px] text-muted-foreground text-center">
+                  Instantly provisions isolated database tenant, owner account, and workflows.
+                </p>
+              </CardContent>
+            </TabsContent>
+          </Tabs>
         </Card>
       </div>
 
       <footer className="mt-auto border-t bg-muted/40">
         <div className="mx-auto max-w-6xl px-4 sm:px-6 py-3 text-[11px] text-muted-foreground flex flex-wrap gap-x-4">
           <span className="font-medium">GS ClientFlow</span>
-          <span>Sandbox demo — seeded dataset, live-computed analytics, simulated delivery channels</span>
+          <span>Enterprise multi-tenant client growth OS — strict row-level security isolation</span>
         </div>
       </footer>
     </div>
