@@ -163,6 +163,7 @@ export default function Page() {
     );
   }
 
+  const t = ctx.tenant;
   const current = activeNav.find((n) => n.id === view) ?? activeNav[0];
 
   const viewEl = (() => {
