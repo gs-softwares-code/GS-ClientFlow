@@ -20,8 +20,15 @@ node_modules
 # production
 /build
 
-# misc
+# IDEs and editors
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+
+# OS and system files
 .DS_Store
+Thumbs.db
 *.pem
 
 # debug & logs
@@ -34,7 +41,7 @@ dev.log
 dev.out.log
 server.log
 
-# env files (explicitly exclude all .env files except .env.example)
+# env files (strictly exclude secrets, allow only public examples)
 .env
 .env.*
 .env.local
@@ -45,6 +52,9 @@ server.log
 !.env.production.example
 
 # database & runtime state
+*.db
+*.db-journal
+*.db-wal
 db/*.db
 db/*.db-journal
 db/*.db-wal
