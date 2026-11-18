@@ -5,22 +5,26 @@ export function formatINR(cents: number | null | undefined): string {
   return new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(cents / 100);
 }
 
-export function formatDate(iso: string | Date | null | undefined): string {
+export function formatDate(iso: string | number | Date | null | undefined): string {
   if (!iso) return "—";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 }
 
-export function formatDateTime(iso: string | Date | null | undefined): string {
+export function formatDateTime(iso: string | number | Date | null | undefined): string {
   if (!iso) return "—";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
+  const d = iso instanceof Date ? iso : new Date(iso);
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
-export function timeAgo(iso: string | Date | null | undefined): string {
+export function timeAgo(iso: string | number | Date | null | undefined): string {
   if (!iso) return "—";
-  const d = typeof iso === "string" ? new Date(iso) : iso;
-  const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+  const d = iso instanceof Date ? iso : new Date(iso);
+  const time = d.getTime();
+  if (isNaN(time)) return "—";
+  const sec = Math.floor((Date.now() - time) / 1000);
   if (sec < 5) return "just now";
   if (sec < 60) return `${sec}s ago`;
   if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
