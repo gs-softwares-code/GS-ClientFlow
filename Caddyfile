@@ -1,4 +1,4 @@
-:81 {
+{$APP_DOMAIN::80} {
 	# Global Perimeter Security Headers
 	header {
 		# Strip untrusted incoming spoofed headers
@@ -37,7 +37,7 @@
 
 	# Reverse proxy strictly to local loopback (127.0.0.1)
 	handle {
-		reverse_proxy 127.0.0.1:3000 {
+		reverse_proxy {$UPSTREAM_HOST:127.0.0.1}:3000 {
 			header_up Host {host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}
