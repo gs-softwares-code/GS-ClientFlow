@@ -94,6 +94,28 @@ export default function Page() {
     };
   }, [ctx?.tenant.id]);
 
+  const activeNav = useMemo(() => {
+    if (!ctx) return [];
+    const modules = ctx.tenant.settings.modules;
+    const nav: { id: ViewId; label: string; icon: React.ElementType; enabled: boolean; group: string }[] = [
+      { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, enabled: true, group: "Operate" },
+      { id: "customers", label: "Customers", icon: Users, enabled: true, group: "Operate" },
+      { id: "feedback", label: "Feedback", icon: Star, enabled: modules.feedback, group: "Operate" },
+      { id: "automation", label: "Automation", icon: Workflow, enabled: true, group: "Grow" },
+      { id: "campaigns", label: "Campaigns & Offers", icon: Megaphone, enabled: modules.campaigns, group: "Grow" },
+      { id: "loyalty", label: "Loyalty", icon: Gift, enabled: modules.loyalty, group: "Grow" },
+      { id: "appointments", label: "Appointments", icon: CalendarClock, enabled: modules.appointments, group: "Grow" },
+      { id: "whitelabel", label: "White-label", icon: Palette, enabled: modules.whiteLabel, group: "Platform" },
+      { id: "analytics", label: "Analytics", icon: BarChart3, enabled: true, group: "Platform" },
+      { id: "ops", label: "Ops & Security", icon: ShieldCheck, enabled: true, group: "Platform" },
+      { id: "portal", label: "Client Portal", icon: Globe, enabled: true, group: "Platform" },
+      { id: "report", label: "Report", icon: ClipboardList, enabled: true, group: "Platform" },
+    ];
+    return nav.filter((n) => n.enabled);
+  }, [ctx]);
+
+  const groups = useMemo(() => [...new Set(activeNav.map((n) => n.group))], [activeNav]);
+
   const logout = async () => {
     await apiPost("/api/auth/logout").catch(() => undefined);
     setCtx(null);
@@ -141,25 +163,6 @@ export default function Page() {
     );
   }
 
-  const t = ctx.tenant;
-  const modules = t.settings.modules;
-
-  const nav: { id: ViewId; label: string; icon: React.ElementType; enabled: boolean; group: string }[] = [
-    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, enabled: true, group: "Operate" },
-    { id: "customers", label: "Customers", icon: Users, enabled: true, group: "Operate" },
-    { id: "feedback", label: "Feedback", icon: Star, enabled: modules.feedback, group: "Operate" },
-    { id: "automation", label: "Automation", icon: Workflow, enabled: true, group: "Grow" },
-    { id: "campaigns", label: "Campaigns & Offers", icon: Megaphone, enabled: modules.campaigns, group: "Grow" },
-    { id: "loyalty", label: "Loyalty", icon: Gift, enabled: modules.loyalty, group: "Grow" },
-    { id: "appointments", label: "Appointments", icon: CalendarClock, enabled: modules.appointments, group: "Grow" },
-    { id: "whitelabel", label: "White-label", icon: Palette, enabled: modules.whiteLabel, group: "Platform" },
-    { id: "analytics", label: "Analytics", icon: BarChart3, enabled: true, group: "Platform" },
-    { id: "ops", label: "Ops & Security", icon: ShieldCheck, enabled: true, group: "Platform" },
-    { id: "portal", label: "Client Portal", icon: Globe, enabled: true, group: "Platform" },
-    { id: "report", label: "Report", icon: ClipboardList, enabled: true, group: "Platform" },
-  ];
-  const activeNav = nav.filter((n) => n.enabled);
-  const groups = useMemo(() => [...new Set(activeNav.map((n) => n.group))], [activeNav]);
   const current = activeNav.find((n) => n.id === view) ?? activeNav[0];
 
   const viewEl = (() => {
