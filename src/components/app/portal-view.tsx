@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { BadgeCheck, Check, Clock, Gift, Globe, Phone, Search, Star, Ticket, Wallet } from "lucide-react";
+import { BadgeCheck, Check, Clock, Gift, Globe, Phone, Search, Sparkles, Star, Ticket, Wallet } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
@@ -372,6 +373,9 @@ function BookTab({ ctx, info, appointmentsOn }: { ctx: AppCtx; info: PortalRespo
   const [date, setDate] = useState(() => new Date(Date.now() + 86400_000).toISOString().slice(0, 10));
   const [time, setTime] = useState("11:00");
   const [note, setNote] = useState("");
+  const [haircutStyle, setHaircutStyle] = useState("Classic & Textured");
+  const [musicGenre, setMusicGenre] = useState("Lo-Fi Beats");
+  const [beverage, setBeverage] = useState("Espresso");
   const [token, setToken] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [booked, setBooked] = useState(false);
@@ -410,6 +414,12 @@ function BookTab({ ctx, info, appointmentsOn }: { ctx: AppCtx; info: PortalRespo
         serviceId,
         startAt: new Date(`${date}T${time}`).toISOString(),
         note,
+        preferences: {
+          haircutStyle,
+          musicGenre,
+          beverage,
+          notes: note,
+        },
         turnstileToken: token,
       });
       toast({ title: res.message });
@@ -515,6 +525,56 @@ function BookTab({ ctx, info, appointmentsOn }: { ctx: AppCtx; info: PortalRespo
               <div className="space-y-1.5">
                 <Label htmlFor="bk-time">Time</Label>
                 <Input id="bk-time" type="time" required value={time} onChange={(e) => setTime(e.target.value)} />
+              </div>
+            </div>
+
+            {/* Ambient Visit Preferences (Smart Salon / Spa) */}
+            <div className="rounded-lg border bg-muted/40 p-3.5 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-semibold">
+                <Sparkles className="h-4 w-4 text-[var(--brand)]" />
+                Personalize Your Visit Experience (Ambient Concierge)
+              </div>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1">
+                  <Label htmlFor="bk-style" className="text-xs">Preferred Style</Label>
+                  <Input
+                    id="bk-style"
+                    className="h-8 text-xs"
+                    value={haircutStyle}
+                    onChange={(e) => setHaircutStyle(e.target.value)}
+                    placeholder="e.g. Fade Cut, Balayage, Layered"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="bk-music" className="text-xs">Lounge Music</Label>
+                  <Select value={musicGenre} onValueChange={setMusicGenre}>
+                    <SelectTrigger id="bk-music" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Lo-Fi Beats">Lo-Fi Beats</SelectItem>
+                      <SelectItem value="Acoustic Chill">Acoustic Chill</SelectItem>
+                      <SelectItem value="Deep House">Deep House</SelectItem>
+                      <SelectItem value="Classical">Classical</SelectItem>
+                      <SelectItem value="Silence / Quiet">Silence / Quiet</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label htmlFor="bk-beverage" className="text-xs">Welcome Drink</Label>
+                  <Select value={beverage} onValueChange={setBeverage}>
+                    <SelectTrigger id="bk-beverage" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Espresso">Fresh Espresso</SelectItem>
+                      <SelectItem value="Green Tea">Herbal Green Tea</SelectItem>
+                      <SelectItem value="Sparkling Water">Sparkling Water</SelectItem>
+                      <SelectItem value="Iced Latte">Iced Latte</SelectItem>
+                      <SelectItem value="None">None / Water Only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
 

@@ -196,5 +196,62 @@ export async function workflowPresetDefinitions() {
     { category: "appointment_reminder", name: "Appointment reminders", dateKind: "appointment_reminder", channel: "sms", template: "Reminder: your appointment at {business} is tomorrow. Reply to reschedule if needed.", description: "24h reminder before each appointment." },
     { category: "feedback_followup", name: "Low rating follow-up", triggerEvent: "feedback.submitted", channel: "email", conditionRules: [{ attr: "feedbackRating", op: "lte", value: 3 }], template: "Hi {name}, thank you for your honest feedback at {business}. We would love to make it right — can we call you this week?", description: "Apology outreach when a rating is 3 stars or lower." },
     { category: "offer_expiry", name: "Offer expiry nudges", dateKind: "offer_expiry", channel: "email", template: "Hi {name}, your offer at {business} is about to expire — do not let it slip away!", description: "Reminder 3 days before an offer/coupon expires." },
+    // High-value Vertical Automation Blueprints
+    {
+      category: "coaching",
+      name: "Coaching Absentee Parent Alert & Staff Escalation",
+      triggerEvent: "attendance.marked_absent",
+      channel: "whatsapp",
+      template: "Alert from {business}: Your ward {name} was marked absent today. Reply 1 for Leave or 2 for Late. If no response in 60m, our staff will call.",
+      description: "Auto-escalates student absence via WhatsApp with 60-min parent reply tracking and fallback staff call tasks.",
+    },
+    {
+      category: "gym",
+      name: "Gym Expiry Tracker & Owner Daily Digest",
+      triggerEvent: "membership.expiring_soon",
+      channel: "whatsapp",
+      template: "Hi {name}, your gym membership at {business} is expiring soon. Click to renew and avoid disruption: https://gsclientflow.app/portal",
+      description: "Multi-stage 7d/3d/1d WhatsApp renewal reminders, front-desk collection tasks, and daily owner executive metrics digest.",
+    },
+    {
+      category: "salon",
+      name: "Smart Salon Concierge & Ambient Check-In",
+      triggerEvent: "appointment.booked_smart",
+      channel: "whatsapp",
+      template: "Hi {name}, your appointment at {business} is confirmed with your preferred stylist, music genre, and refreshment ready upon arrival!",
+      description: "Auto-matches stylist specialties, triggers reception kiosk check-ins with ambient IoT preferences, and offers rebook incentives.",
+    },
   ] as const;
+}
+
+export async function installVerticalBlueprints(tenantId: string, vertical: "COACHING" | "GYM" | "SALON") {
+  const definitions = await workflowPresetDefinitions();
+  const targetCategory = vertical.toLowerCase();
+  const blueprint = definitions.find((d) => d.category === targetCategory) as {
+    category: string;
+    name: string;
+    triggerEvent?: string;
+    channel: string;
+    template: string;
+  } | undefined;
+  if (!blueprint) return null;
+
+  const existing = await db.workflow.findFirst({
+    where: { tenantId, name: blueprint.name },
+  });
+  if (existing) return existing;
+
+  return db.workflow.create({
+    data: {
+      tenantId,
+      name: blueprint.name,
+      category: blueprint.category,
+      triggerType: "event",
+      triggerEvent: blueprint.triggerEvent ?? null,
+      channel: blueprint.channel,
+      template: blueprint.template,
+      active: true,
+      conditionRules: "[]",
+    },
+  });
 }

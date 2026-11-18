@@ -13,6 +13,20 @@ export const EventTypes = {
   CampaignCompleted: "campaign.completed",
   AppointmentBooked: "appointment.booked",
   AppointmentCancelled: "appointment.cancelled",
+  // Vertical 1: Coaching Institute Attendance & Parent Escalation
+  AttendanceMarkedAbsent: "attendance.marked_absent",
+  AttendanceGuardianReplied: "attendance.guardian_replied",
+  AttendanceNoReplyTimeout: "attendance.no_reply_timeout",
+  // Vertical 2: Gym Membership Expiry & Daily Digest
+  MembershipCreatedOrUpdated: "membership.created_or_updated",
+  MembershipExpiringSoon: "membership.expiring_soon",
+  MembershipPaymentReceived: "membership.payment_received",
+  OpsDailyGymSummary: "ops.daily_gym_summary",
+  // Vertical 3: Smart Salon Booking & Reception Check-In
+  AppointmentBookedSmart: "appointment.booked_smart",
+  AppointmentReminder24h: "appointment.reminder_24h",
+  AppointmentReceptionCheckedIn: "appointment.reception_checked_in",
+  AppointmentServiceCompleted: "appointment.service_completed",
 } as const;
 
 export type EventType = (typeof EventTypes)[keyof typeof EventTypes];
@@ -28,6 +42,20 @@ export const EVENT_CATALOG: { type: EventType; description: string; source: stri
   { type: EventTypes.CampaignCompleted, description: "Emitted after the worker finishes executing a campaign.", source: "worker" },
   { type: EventTypes.AppointmentBooked, description: "Emitted when an appointment is booked (public or staff).", source: "appointments service" },
   { type: EventTypes.AppointmentCancelled, description: "Emitted when an appointment is cancelled.", source: "appointments service" },
+  // Vertical 1: Coaching
+  { type: EventTypes.AttendanceMarkedAbsent, description: "Emitted when a student is marked absent, initiating automated guardian WhatsApp contact.", source: "attendance service" },
+  { type: EventTypes.AttendanceGuardianReplied, description: "Emitted when a guardian replies to an absentee notification with Leave or Late arrival.", source: "webhooks" },
+  { type: EventTypes.AttendanceNoReplyTimeout, description: "Emitted after a timeout with no guardian response, creating a high-priority staff task.", source: "worker" },
+  // Vertical 2: Gym
+  { type: EventTypes.MembershipCreatedOrUpdated, description: "Emitted when a gym membership is purchased or renewed.", source: "membership service" },
+  { type: EventTypes.MembershipExpiringSoon, description: "Emitted when a membership is 7, 3, or 1 day(s) from expiration.", source: "scheduler" },
+  { type: EventTypes.MembershipPaymentReceived, description: "Emitted when a gym membership payment is settled.", source: "membership service" },
+  { type: EventTypes.OpsDailyGymSummary, description: "Emitted daily to compile and dispatch an executive metrics digest to gym owners.", source: "scheduler" },
+  // Vertical 3: Salon
+  { type: EventTypes.AppointmentBookedSmart, description: "Emitted when an appointment is auto-assigned to an optimal stylist with ambient preferences.", source: "appointments service" },
+  { type: EventTypes.AppointmentReminder24h, description: "Emitted 24 hours prior to service with a self-service reschedule link.", source: "scheduler" },
+  { type: EventTypes.AppointmentReceptionCheckedIn, description: "Emitted when a client arrives at the salon kiosk, alerting the assigned stylist.", source: "reception kiosk" },
+  { type: EventTypes.AppointmentServiceCompleted, description: "Emitted when salon service concludes, triggering retention discount & feedback loop.", source: "appointments service" },
 ];
 
 const id = z.string().min(1);
@@ -76,4 +104,74 @@ export const PayloadSchemas = {
   }),
   [EventTypes.AppointmentBooked]: z.object({ appointmentId: id, customerId: id, startAtMs: z.number() }),
   [EventTypes.AppointmentCancelled]: z.object({ appointmentId: id, customerId: id, by: z.string() }),
+  // Vertical 1 Schemas
+  [EventTypes.AttendanceMarkedAbsent]: z.object({
+    attendanceId: id,
+    customerId: id,
+    studentName: z.string(),
+    guardianPhone: z.string(),
+    batchOrClass: z.string(),
+    date: z.string(),
+  }),
+  [EventTypes.AttendanceGuardianReplied]: z.object({
+    attendanceId: id,
+    customerId: id,
+    replyType: z.enum(["LEAVE", "LATE", "OTHER"]),
+    rawMessage: z.string(),
+  }),
+  [EventTypes.AttendanceNoReplyTimeout]: z.object({
+    attendanceId: id,
+    customerId: id,
+    guardianPhone: z.string(),
+  }),
+  // Vertical 2 Schemas
+  [EventTypes.MembershipCreatedOrUpdated]: z.object({
+    membershipId: id,
+    customerId: id,
+    planName: z.string(),
+    expiryDate: z.string(),
+    paymentStatus: z.string(),
+  }),
+  [EventTypes.MembershipExpiringSoon]: z.object({
+    membershipId: id,
+    customerId: id,
+    daysRemaining: z.number(),
+    renewalLink: z.string().optional(),
+  }),
+  [EventTypes.MembershipPaymentReceived]: z.object({
+    membershipId: id,
+    customerId: id,
+    amount: z.number(),
+  }),
+  [EventTypes.OpsDailyGymSummary]: z.object({
+    date: z.string(),
+    activeCount: z.number(),
+    expiredCount: z.number(),
+    pendingDuesAmount: z.number(),
+    expiringIn7DaysCount: z.number(),
+  }),
+  // Vertical 3 Schemas
+  [EventTypes.AppointmentBookedSmart]: z.object({
+    appointmentId: id,
+    customerId: id,
+    assignedStaffId: z.string().nullable().optional(),
+    preferences: z.record(z.string(), z.unknown()).optional(),
+  }),
+  [EventTypes.AppointmentReminder24h]: z.object({
+    appointmentId: id,
+    customerId: id,
+    rescheduleUrl: z.string().optional(),
+  }),
+  [EventTypes.AppointmentReceptionCheckedIn]: z.object({
+    appointmentId: id,
+    customerId: id,
+    assignedStaffId: z.string().nullable().optional(),
+    preferences: z.record(z.string(), z.unknown()).optional(),
+  }),
+  [EventTypes.AppointmentServiceCompleted]: z.object({
+    appointmentId: id,
+    customerId: id,
+    feedbackUrl: z.string().optional(),
+    rebookIncentiveCode: z.string().optional(),
+  }),
 } satisfies Record<EventType, z.ZodTypeAny>;

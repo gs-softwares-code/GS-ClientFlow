@@ -6,7 +6,8 @@ import { executeCampaign } from "@/server/services/campaigns";
 import { executeWorkflowForCustomer } from "@/server/services/workflow-engine";
 import { sendChannelMessage } from "@/server/channels/adapter";
 import { parseJson } from "@/server/lib/json";
-import { verifyEventPayload } from "@/server/events/outbox";
+import { verifyEventPayload, publish } from "@/server/events/outbox";
+import { EventTypes } from "@/server/events/contracts";
 
 /**
  * Outbox worker — the sandbox equivalent of the Cloudflare Queues consumer.
@@ -307,6 +308,24 @@ async function processScheduledAction(actionId: string, tenantId: string, kind: 
         seed: payload.seed ?? `inactive:${actionId}`,
         source: "inactive re-engagement scan",
       });
+      break;
+    }
+    case "attendance_no_reply_check": {
+      const att = await db.attendanceLog.findFirst({
+        where: { id: payload.attendanceId, tenantId },
+      });
+      if (att && att.status === "ABSENT" && att.guardianReplyStatus === "PENDING") {
+        await publish(db, {
+          tenantId,
+          type: EventTypes.AttendanceNoReplyTimeout,
+          payload: {
+            attendanceId: att.id,
+            customerId: att.customerId,
+            guardianPhone: att.guardianPhone,
+          },
+          dedupeKey: `att_timeout:${att.id}`,
+        });
+      }
       break;
     }
     default:

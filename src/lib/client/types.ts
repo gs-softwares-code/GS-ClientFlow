@@ -101,6 +101,65 @@ export type CustomerListResponse = { items: CustomerListItem[]; nextCursor: stri
 
 export type Branding = { brandColor: string; logoText: string; name: string };
 
+export type StaffMember = {
+  id: string;
+  name: string;
+  role: string;
+  phone?: string | null;
+  specialties?: string[] | null;
+  isActive: boolean;
+};
+
+export type AttendanceLog = {
+  id: string;
+  customerId: string;
+  batchOrClass: string;
+  date: string;
+  status: "PRESENT" | "ABSENT" | "LATE" | "ON_LEAVE";
+  guardianPhone: string;
+  notifiedAt?: string | null;
+  guardianReplyStatus: "PENDING" | "ACKNOWLEDGED_LEAVE" | "ACKNOWLEDGED_LATE" | "NO_REPLY";
+  guardianReplyText?: string | null;
+  followUpTaskId?: string | null;
+  createdAt?: string;
+  customer?: { id: string; name: string; email: string; phone?: string | null };
+};
+
+export type StaffFollowUpTask = {
+  id: string;
+  customerId: string;
+  assignedToUserId?: string | null;
+  taskType: string;
+  status: "OPEN" | "IN_PROGRESS" | "RESOLVED";
+  dueAt: string;
+  notes?: string | null;
+  createdAt?: string;
+  customer?: { id: string; name: string; email: string; phone?: string | null };
+};
+
+export type Membership = {
+  id: string;
+  customerId: string;
+  planName: string;
+  priceAmount: number;
+  startDate: string;
+  expiryDate: string;
+  paymentStatus: "PAID" | "PENDING" | "OVERDUE";
+  status: "ACTIVE" | "EXPIRING_SOON" | "EXPIRED" | "CANCELLED";
+  lastReminderSentAt?: string | null;
+  autoSyncSheetRowId?: string | null;
+  createdAt?: string;
+  customer?: { id: string; name: string; email: string; phone?: string | null };
+};
+
+export type AppointmentPreference = {
+  haircutStyle?: string;
+  musicGenre?: string;
+  beverage?: string;
+  notes?: string;
+  [key: string]: unknown;
+};
+
 /** Context passed to every view. */
 export type AppCtx = {
   user: AppUser;

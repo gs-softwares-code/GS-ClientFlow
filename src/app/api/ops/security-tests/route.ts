@@ -4,6 +4,8 @@ import { getCustomer, updateCustomer } from "@/server/services/customers";
 import { setFeedbackStatus } from "@/server/services/feedback";
 import { cancelAppointment } from "@/server/services/appointments";
 import { redeemOffer } from "@/server/services/offers";
+import { resolveFollowUpTask } from "@/server/services/attendance";
+import { updateMembershipPayment } from "@/server/services/memberships";
 import { withRoute, jsonOk } from "@/server/tenancy/guard";
 import { logEvent } from "@/server/logs";
 import { validateOutboundUrl, SsrfError } from "@/server/lib/ssrf";
@@ -189,6 +191,41 @@ export async function GET(_req: NextRequest) {
         if (typeof count !== "number") throw new Error("Count query failed in context");
       });
       throw new Error("PASS: withTenantContext executed query safely in isolated scope");
+    });
+
+    // 14. Cross-tenant coaching attendance & follow-up isolation
+    await probe("Cross-tenant attendance and follow-up tasks are isolated", async () => {
+      if (!otherTenant) throw new Error("PASS: no foreign tenant");
+      const foreignTask = await db.staffFollowUpTask.findFirst({ where: { tenantId: otherTenant.id } });
+      if (!foreignTask) throw new Error("PASS: no foreign follow-up tasks exist");
+      const resolved = await resolveFollowUpTask(ctx.tenant.id, foreignTask.id, "Attempted unauthorized resolution");
+      if (resolved === null) throw new Error("PASS: resolveFollowUpTask rejected foreign task id");
+      return "FAIL: foreign staff follow-up task was resolved!";
+    });
+
+    // 15. Cross-tenant gym membership payment isolation
+    await probe("Cross-tenant gym membership payment mutation is refused", async () => {
+      if (!otherTenant) throw new Error("PASS: no foreign tenant");
+      const foreignMemb = await db.membership.findFirst({ where: { tenantId: otherTenant.id } });
+      if (!foreignMemb) throw new Error("PASS: no foreign memberships exist");
+      const updated = await updateMembershipPayment(ctx.tenant.id, foreignMemb.id, "PAID");
+      if (updated === null) throw new Error("PASS: updateMembershipPayment refused foreign membership id");
+      return "FAIL: foreign membership payment status was mutated!";
+    });
+
+    // 16. Outbox domain event tenant isolation
+    await probe("Cross-tenant outbox events cannot be read across tenant boundary", async () => {
+      if (!otherTenant) throw new Error("PASS: no foreign tenant");
+      const foreignEvents = await db.outboxEvent.findMany({
+        where: { tenantId: otherTenant.id },
+        take: 5,
+      });
+      if (foreignEvents.length === 0) throw new Error("PASS: no foreign outbox events exist");
+      const leaked = await db.outboxEvent.findFirst({
+        where: { tenantId: ctx.tenant.id, id: foreignEvents[0].id },
+      });
+      if (!leaked) throw new Error("PASS: foreign outbox event is strictly unqueriable under local tenant context");
+      return "FAIL: foreign outbox event leaked across tenant boundary!";
     });
 
     const passed = results.filter((r) => r.passed).length;

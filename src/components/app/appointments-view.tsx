@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Bell, CalendarPlus, Download, Plus, Search } from "lucide-react";
+import { Bell, CalendarPlus, Coffee, Download, Music, Plus, Scissors, Search, Sparkles, Tablet } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -49,6 +49,10 @@ type Appointment = {
   customer: { id: string; name: string; email: string; phone: string | null };
   service: { id: string; name: string } | null;
   staff: { id: string; name: string } | null;
+  assignedStaff?: { id: string; name: string; role: string } | null;
+  checkInStatus?: string | null;
+  checkedInAt?: string | null;
+  preferences?: string | Record<string, unknown> | null;
 };
 
 type ServiceRow = { id: string; name: string; durationMin: number; priceCents: number; active: boolean };
@@ -260,6 +264,28 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
     }
   };
 
+  const [receptionMode, setReceptionMode] = useState(false);
+
+  const handleCheckIn = async (a: Appointment) => {
+    setBusyId(a.id);
+    try {
+      await apiPost(`/api/appointments/${encodeURIComponent(a.id)}/check-in`, {});
+      toast({
+        title: "Guest Checked In!",
+        description: `Ambient preferences dispatched to stylist station for ${a.customer.name}.`,
+      });
+      await loadAppointments();
+    } catch (err) {
+      toast({
+        title: "Check-in failed",
+        description: (err as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const resetBookForm = () => {
     setPickerQuery("");
     setPickerResults(null);
@@ -408,6 +434,14 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button
+            variant={receptionMode ? "default" : "outline"}
+            className={`h-10 gap-1.5 ${receptionMode ? "bg-teal-600 text-white" : ""}`}
+            onClick={() => setReceptionMode((v) => !v)}
+          >
+            <Tablet className="h-4 w-4" />
+            {receptionMode ? "Tablet Kiosk: ON" : "Reception Tablet Mode"}
+          </Button>
+          <Button
             variant="outline"
             className="h-10 gap-1.5"
             onClick={() => downloadFile("/api/export/appointments", `appointments-${ctx.tenant.slug}.csv`)}
@@ -419,6 +453,21 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
           </Button>
         </div>
       </div>
+
+      {receptionMode && (
+        <div className="rounded-lg border border-teal-500/30 bg-teal-500/10 p-3.5 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Tablet className="h-4 w-4 text-teal-600" />
+            <div>
+              <span className="text-xs font-semibold text-teal-900 dark:text-teal-200">Reception Tablet Check-In Mode</span>
+              <p className="text-[11px] text-teal-800/80 dark:text-teal-300/80">
+                1-click guest check-in will broadcast guest music, haircut style, and beverage preferences straight to stylist mirror stations.
+              </p>
+            </div>
+          </div>
+          <Badge className="bg-teal-600 text-white text-[10px]">Ambient IoT Enabled</Badge>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Calendar column */}
@@ -450,6 +499,7 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
                         key={a.id}
                         a={a}
                         busy={busyId === a.id}
+                        onCheckIn={() => void handleCheckIn(a)}
                         onConfirm={() =>
                           void patchAppointment(a, { status: "confirmed" }, {
                             title: "Appointment confirmed",
@@ -829,6 +879,7 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
 function AppointmentRow({
   a,
   busy,
+  onCheckIn,
   onConfirm,
   onComplete,
   onNoShow,
@@ -836,12 +887,25 @@ function AppointmentRow({
 }: {
   a: Appointment;
   busy: boolean;
+  onCheckIn?: () => void;
   onConfirm: () => void;
   onComplete: () => void;
   onNoShow: () => void;
   onCancel: () => void;
 }) {
   const active = a.status === "scheduled" || a.status === "confirmed";
+
+  let prefs: Record<string, unknown> | null = null;
+  if (typeof a.preferences === "string") {
+    try {
+      prefs = JSON.parse(a.preferences);
+    } catch {}
+  } else if (a.preferences && typeof a.preferences === "object") {
+    prefs = a.preferences as Record<string, unknown>;
+  }
+
+  const isCheckedIn = a.checkInStatus === "CHECKED_IN" || a.checkInStatus === "checked_in";
+
   return (
     <div className="rounded-lg border p-3 sm:p-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start">
@@ -853,6 +917,11 @@ function AppointmentRow({
           <div className="flex flex-wrap items-center gap-2">
             <p className="truncate text-sm font-medium">{a.customer.name}</p>
             <StatusBadge status={a.status} />
+            {isCheckedIn && (
+              <Badge className="bg-teal-600/15 text-teal-700 dark:text-teal-300 border-teal-600/30 text-[10px]">
+                Checked In
+              </Badge>
+            )}
             <Tooltip>
               <TooltipTrigger asChild>
                 <span className="inline-flex cursor-default">
@@ -866,12 +935,31 @@ function AppointmentRow({
           </div>
           <p className="truncate text-xs text-muted-foreground">
             {a.customer.phone ?? "no phone on file"} · {a.service ? `${a.service.name} (${a.durationMin} min)` : "no service"} ·{" "}
-            {a.staff ? a.staff.name : "unassigned"}
+            {a.assignedStaff ? (
+              <span className="font-medium text-foreground">Stylist: {a.assignedStaff.name}</span>
+            ) : a.staff ? (
+              a.staff.name
+            ) : (
+              "unassigned"
+            )}
           </p>
           {a.note ? <p className="truncate text-xs italic text-muted-foreground">{a.note}</p> : null}
+          {prefs && (
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 rounded border border-muted/80 bg-muted/30 px-2 py-1 text-[11px] text-muted-foreground">
+              <Sparkles className="h-3 w-3 text-teal-600" />
+              {prefs.haircutStyle ? <span>Style: <strong className="text-foreground">{String(prefs.haircutStyle)}</strong></span> : null}
+              {prefs.musicGenre ? <span className="flex items-center gap-1"><Music className="h-3 w-3" /> {String(prefs.musicGenre)}</span> : null}
+              {prefs.beverage ? <span className="flex items-center gap-1"><Coffee className="h-3 w-3" /> {String(prefs.beverage)}</span> : null}
+            </div>
+          )}
           <p className="text-[10px] text-muted-foreground">booked {timeAgo(a.createdAt)}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+          {active && !isCheckedIn && onCheckIn && (
+            <Button size="sm" className="h-9 gap-1.5 bg-teal-600 text-white hover:bg-teal-700" disabled={busy} onClick={onCheckIn}>
+              <Tablet className="h-3.5 w-3.5" /> Check In
+            </Button>
+          )}
           {a.status === "scheduled" && (
             <Button variant="outline" size="sm" className="h-9" disabled={busy} onClick={onConfirm}>
               Confirm

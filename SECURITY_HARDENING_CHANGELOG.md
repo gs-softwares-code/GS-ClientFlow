@@ -164,3 +164,54 @@ A comprehensive, defense-in-depth security hardening sprint was executed across 
    - **Type Checking:** `bunx tsc --noEmit` &rarr; `Exit Code 0` (clean, 0 errors).
    - **Linting:** `bun run lint` &rarr; `Exit Code 0` (clean, 0 warnings/errors).
    - **Runtime Script Tests:** `tests/database-runtime-build.sh` & `tests/python-runtime-build.sh` &rarr; `PASS`.
+
+---
+
+## Multi-Vertical Automation Suite Expansion
+
+**Execution Date:** November 2026  
+**Architect:** Staff Full-Stack Systems & Security Engineer  
+**Objective:** Deliver native end-to-end automation pipelines across Coaching Institutes, Gyms, and Smart Salons with zero-placeholder production TypeScript, PostgreSQL RLS enforcement, and transactional outbox guarantees.
+
+### Architectural Deliverables:
+
+1. **Database Schemas & RLS Enforcement:**
+   - **PostgreSQL / Neon Migration:** Generated [`src/db/migrations/0002_vertical_automations_rls.sql`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/db/migrations/0002_vertical_automations_rls.sql) with `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY` across `staff_members`, `attendance_logs`, `staff_follow_up_tasks`, and `memberships`.
+   - **Drizzle & Prisma Synchronized:** Models added to [`src/db/schema.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/db/schema.ts) and [`prisma/schema.prisma`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/prisma/schema.prisma) with composite tenant indexes.
+
+2. **Transactional Outbox Event Contracts & Handlers:**
+   - Registered 11 strongly-typed domain events in [`src/server/events/contracts.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/events/contracts.ts):
+     - `attendance.marked_absent`, `attendance.guardian_replied`, `attendance.no_reply_timeout`
+     - `membership.created_or_updated`, `membership.expiring_soon`, `membership.payment_received`, `ops.daily_gym_summary`
+     - `appointment.booked_smart`, `appointment.reminder_24h`, `appointment.reception_checked_in`, `appointment.service_completed`
+   - Added asynchronous worker handlers in [`src/server/events/handlers.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/events/handlers.ts) and 60-min timer actions in [`src/server/events/worker.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/events/worker.ts).
+   - Added scheduled cron sweeps in [`src/server/events/scheduler.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/events/scheduler.ts) for 7d/3d/1d membership expiries, daily 08:00 AM owner digest, and 24h appointment reminders.
+
+3. **Backend Services:**
+   - [`src/server/services/attendance.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/services/attendance.ts): Implemented `markAttendance()`, parent reply parser (`processGuardianReply()`), `listStaffFollowUpTasks()`, and `resolveFollowUpTask()`.
+   - [`src/server/services/memberships.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/services/memberships.ts): Implemented subscription lifecycle management, payment toggling, daily digest generation, and SSRF-safe Google Sheets sync via `safeFetch`.
+   - [`src/server/services/appointments.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/services/appointments.ts): Auto-matching stylist specialties, reception check-in with ambient IoT preference dispatch, and post-service rebooking rewards.
+   - [`src/server/services/workflow-engine.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/services/workflow-engine.ts): Installed vertical automation blueprint templates.
+
+4. **API Routes & Webhooks:**
+   - [`src/app/api/attendance/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/attendance/route.ts): Roster query, bulk marking, and task resolution.
+   - [`src/app/api/memberships/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/memberships/route.ts) & [`src/app/api/memberships/[id]/payment/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/memberships/[id]/payment/route.ts): Membership ledger and payment toggling.
+   - [`src/app/api/appointments/[id]/check-in/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/appointments/[id]/check-in/route.ts): 1-click tablet kiosk check-in returning ambient card.
+   - [`src/app/api/webhooks/inbound-channel/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/webhooks/inbound-channel/route.ts): Inbound WhatsApp parent reply webhook with HMAC validation and rate-limiting.
+
+5. **Frontend UI Experience:**
+   - [`src/components/app/automation-view.tsx`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/components/app/automation-view.tsx): 1-click Vertical Automation Blueprint activation cards.
+   - [`src/components/app/portal-view.tsx`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/components/app/portal-view.tsx): Added "Personalize Your Visit Experience (Ambient Concierge)" booking step (style, music, beverage).
+   - [`src/components/app/appointments-view.tsx`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/components/app/appointments-view.tsx): Added Reception Tablet Mode toggle with 1-click check-in and ambient guest cards.
+   - [`src/components/app/ops-view.tsx`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/components/app/ops-view.tsx): Added "Attendance Desk" (Coaching) and "Membership Ledger" (Gym) tabs.
+   - [`src/components/app/login-screen.tsx`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/components/app/login-screen.tsx): Added demo credentials for Apex Coaching and IronCore Gym.
+
+6. **Multi-Tenant Security Probes:**
+   - Extended [`src/app/api/ops/security-tests/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/ops/security-tests/route.ts) with probes 14, 15, and 16 verifying cross-tenant isolation on attendance logs, staff follow-up tasks, and memberships.
+
+7. **Verification:**
+   - `bunx tsc --noEmit` &rarr; `Exit Code 0` (clean, 0 errors).
+   - `bun run lint` &rarr; `Exit Code 0` (clean, 0 warnings/errors).
+   - `tests/database-runtime-build.sh` &rarr; `PASS`.
+   - `tests/python-runtime-build.sh` &rarr; `PASS`.
+   - Demo reseed: 4 tenants, 69 customers seeded successfully.

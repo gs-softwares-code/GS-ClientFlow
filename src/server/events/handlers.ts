@@ -8,6 +8,7 @@ import { readSettings } from "@/server/settings";
 import { meterUsage } from "@/server/usage";
 import { logEvent } from "@/server/logs";
 import { sendChannelMessage } from "@/server/channels/adapter";
+import { safeFetch } from "@/server/lib/ssrf";
 
 /**
  * Idempotent event handlers — the "queue consumers". Each handler may safely
@@ -247,6 +248,354 @@ export const handlers: Record<string, Handler> = {
     await dispatchEventWorkflows(event.tenantId, EventTypes.AppointmentCancelled, { id: p.customerId }, {
       seed: `aptcancel:${p.appointmentId}`,
       source: `appointment cancelled by ${p.by}`,
+    });
+  },
+
+  // ------------------------------------------------ Vertical 1: Coaching Institute
+  [EventTypes.AttendanceMarkedAbsent]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AttendanceMarkedAbsent]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+    const settings = readSettings(tenant);
+    const timeoutMin = settings.vertical?.coaching?.parentReplyTimeoutMin ?? 60;
+
+    // 1. Dispatch automated WhatsApp to guardian
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Attendance Alert: ${p.studentName}`,
+      body: `Hello from ${tenant.name}. Your ward ${p.studentName} was marked ABSENT today (${p.date}) for ${p.batchOrClass}.\n\nPlease reply with:\n1 for On Leave\n2 for Running Late`,
+      idempotencyKey: `att_absent_msg:${p.attendanceId}`,
+      requireConsent: false,
+    }).catch(() => undefined);
+
+    // 2. Schedule verification check after timeout (default: 60 minutes)
+    await db.scheduledAction.create({
+      data: {
+        tenantId: event.tenantId,
+        kind: "attendance_no_reply_check",
+        payload: JSON.stringify({
+          attendanceId: p.attendanceId,
+          customerId: p.customerId,
+          guardianPhone: p.guardianPhone,
+        }),
+        dueAt: new Date(Date.now() + timeoutMin * 60_000),
+      },
+    });
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.AttendanceMarkedAbsent, { id: p.customerId }, {
+      seed: `att_absent:${p.attendanceId}`,
+      source: "attendance service",
+    });
+  },
+
+  [EventTypes.AttendanceGuardianReplied]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AttendanceGuardianReplied]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    // Send acknowledgment back to parent
+    const ackText =
+      p.replyType === "LEAVE"
+        ? `Leave acknowledged for ${customer.name}. Thank you for informing ${tenant.name}.`
+        : `Late arrival recorded for ${customer.name}. See you soon!`;
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      body: ackText,
+      idempotencyKey: `att_reply_ack:${p.attendanceId}:${Date.now()}`,
+      requireConsent: false,
+    }).catch(() => undefined);
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.AttendanceGuardianReplied, { id: p.customerId }, {
+      seed: `att_reply:${p.attendanceId}`,
+      source: "inbound parent message",
+    });
+  },
+
+  [EventTypes.AttendanceNoReplyTimeout]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AttendanceNoReplyTimeout]);
+    const att = await db.attendanceLog.findFirst({
+      where: { id: p.attendanceId, tenantId: event.tenantId },
+    });
+    if (!att || att.guardianReplyStatus !== "PENDING") return;
+
+    // Escalate: mark NO_REPLY and create high-priority staff task
+    const task = await db.staffFollowUpTask.create({
+      data: {
+        tenantId: event.tenantId,
+        customerId: p.customerId,
+        taskType: "ATTENDANCE_CALL",
+        status: "OPEN",
+        dueAt: new Date(),
+        notes: `URGENT ESCALATION: Parent did not respond to absence WhatsApp alert. Call guardian at ${p.guardianPhone}.`,
+      },
+    });
+
+    await db.attendanceLog.update({
+      where: { id: att.id },
+      data: {
+        guardianReplyStatus: "NO_REPLY",
+        followUpTaskId: task.id,
+      },
+    });
+
+    await logEvent(
+      "warn",
+      "attendance",
+      `Parent escalation task created for student ${p.customerId} (No reply in 60m)`,
+      { taskId: task.id },
+      event.tenantId
+    );
+  },
+
+  // ------------------------------------------------ Vertical 2: Gym Membership
+  [EventTypes.MembershipCreatedOrUpdated]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.MembershipCreatedOrUpdated]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Welcome to ${tenant.name} Gym`,
+      body: `Hi ${customer.name.split(" ")[0]}, your ${p.planName} membership is confirmed! Valid until ${new Date(p.expiryDate).toLocaleDateString("en-IN")}. Work out hard!`,
+      idempotencyKey: `memb_conf:${p.membershipId}`,
+    }).catch(() => undefined);
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.MembershipCreatedOrUpdated, { id: p.customerId }, {
+      seed: `memb_create:${p.membershipId}`,
+      source: "membership service",
+    });
+  },
+
+  [EventTypes.MembershipExpiringSoon]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.MembershipExpiringSoon]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    const renewalUrl = p.renewalLink || `https://${tenant.slug}.gsclientflow.app/portal?renew=${p.membershipId}`;
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Membership Expiring in ${p.daysRemaining} days`,
+      body: `Hi ${customer.name.split(" ")[0]}, your ${tenant.name} gym membership expires in ${p.daysRemaining} day(s). Renew now to lock in your current rate: ${renewalUrl}`,
+      idempotencyKey: `memb_exp_msg:${p.membershipId}:${p.daysRemaining}`,
+    }).catch(() => undefined);
+
+    // If 1 day remaining, create a renewal staff task for front desk
+    if (p.daysRemaining <= 1) {
+      await db.staffFollowUpTask.create({
+        data: {
+          tenantId: event.tenantId,
+          customerId: p.customerId,
+          taskType: "GYM_RENEWAL_CALL",
+          status: "OPEN",
+          dueAt: new Date(),
+          notes: `Call member ${customer.name} (${customer.phone || customer.email}) — membership expires tomorrow.`,
+        },
+      });
+    }
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.MembershipExpiringSoon, { id: p.customerId }, {
+      seed: `memb_exp:${p.membershipId}:${p.daysRemaining}`,
+      source: "membership scheduler",
+    });
+  },
+
+  [EventTypes.MembershipPaymentReceived]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.MembershipPaymentReceived]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Payment Receipt: ₹${(p.amount / 100).toFixed(2)}`,
+      body: `Thank you ${customer.name.split(" ")[0]}! We have received your payment of ₹${(p.amount / 100).toFixed(2)} for ${tenant.name}. See you on the floor!`,
+      idempotencyKey: `memb_pay_receipt:${p.membershipId}:${Date.now()}`,
+    }).catch(() => undefined);
+  },
+
+  [EventTypes.OpsDailyGymSummary]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.OpsDailyGymSummary]);
+    const tenant = await tenantOf(event.tenantId);
+    const owner = await db.user.findFirst({ where: { tenantId: event.tenantId, role: "owner" } });
+    if (!owner) return;
+
+    const summaryText =
+      `📊 *${tenant.name} Daily Operations Digest (${p.date})*\n\n` +
+      `• Active Members: *${p.activeCount}*\n` +
+      `• Expiring in 7 Days: *${p.expiringIn7DaysCount}*\n` +
+      `• Expired Subscriptions: *${p.expiredCount}*\n` +
+      `• Pending Uncollected Dues: *₹${(p.pendingDuesAmount / 100).toLocaleString("en-IN")}*\n\n` +
+      `Keep crushing it! Manage ledger in your ClientFlow dashboard.`;
+
+    await sendChannelMessage({
+      tenant,
+      customer: { id: owner.id, name: owner.name, email: owner.email, phone: null, consents: "{}" },
+      channel: "email",
+      kind: "transactional",
+      subject: `Daily Operations Digest: ${tenant.name} (${p.date})`,
+      body: summaryText,
+      idempotencyKey: `ops_gym_summary:${tenant.id}:${p.date}`,
+      requireConsent: false,
+    }).catch(() => undefined);
+  },
+
+  // ------------------------------------------------ Vertical 3: Smart Salon
+  [EventTypes.AppointmentBookedSmart]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AppointmentBookedSmart]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    let stylistName = "our top stylist";
+    if (p.assignedStaffId) {
+      const staffMember = await db.staffMember.findFirst({
+        where: { id: p.assignedStaffId, tenantId: event.tenantId },
+      });
+      if (staffMember) stylistName = staffMember.name;
+    }
+
+    const prefs = (p.preferences || {}) as { musicGenre?: string; beverage?: string };
+    const ambientDetails = prefs.beverage || prefs.musicGenre
+      ? ` We have queued your preferred ${prefs.beverage || "refreshment"} and ${prefs.musicGenre || "music"} playlist!`
+      : "";
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Your Booking with ${stylistName}`,
+      body: `Hi ${customer.name.split(" ")[0]}, your appointment at ${tenant.name} is confirmed with stylist ${stylistName}.${ambientDetails}`,
+      idempotencyKey: `apt_smart_conf:${p.appointmentId}`,
+    }).catch(() => undefined);
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.AppointmentBookedSmart, { id: p.customerId }, {
+      seed: `apt_smart:${p.appointmentId}`,
+      source: "smart booking engine",
+    });
+  },
+
+  [EventTypes.AppointmentReminder24h]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AppointmentReminder24h]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    const rescheduleLink = p.rescheduleUrl || `https://${tenant.slug}.gsclientflow.app/portal`;
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `24h Reminder: Appointment at ${tenant.name}`,
+      body: `Hi ${customer.name.split(" ")[0]}, reminding you of your visit tomorrow at ${tenant.name}. Need to reschedule? Tap here: ${rescheduleLink}`,
+      idempotencyKey: `apt_rem24h:${p.appointmentId}`,
+    }).catch(() => undefined);
+  },
+
+  [EventTypes.AppointmentReceptionCheckedIn]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AppointmentReceptionCheckedIn]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+    const settings = readSettings(tenant);
+
+    // 1. Notify assigned stylist
+    if (p.assignedStaffId) {
+      const staffMember = await db.staffMember.findFirst({
+        where: { id: p.assignedStaffId, tenantId: event.tenantId },
+      });
+      if (staffMember && staffMember.phone) {
+        const prefs = (p.preferences || {}) as { haircutStyle?: string; beverage?: string; musicGenre?: string };
+        const alertMsg =
+          `✂️ *CLIENT ARRIVED*: ${customer.name} is here!\n` +
+          `• Style: ${prefs.haircutStyle || "Standard cut"}\n` +
+          `• Beverage: ${prefs.beverage || "Water"}\n` +
+          `• Music: ${prefs.musicGenre || "Default"}`;
+
+        await sendChannelMessage({
+          tenant,
+          customer: { id: staffMember.id, name: staffMember.name, email: "", phone: staffMember.phone, consents: "{}" },
+          channel: "whatsapp",
+          kind: "transactional",
+          body: alertMsg,
+          idempotencyKey: `stylist_checkin_alert:${p.appointmentId}`,
+          requireConsent: false,
+        }).catch(() => undefined);
+      }
+    }
+
+    // 2. Fire ambient IoT controller webhook if configured
+    const ambientUrl = settings.vertical?.salon?.ambientIotWebhookUrl;
+    if (ambientUrl) {
+      try {
+        await safeFetch(ambientUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            event: "client_check_in",
+            clientName: customer.name,
+            preferences: p.preferences,
+            timestamp: new Date().toISOString(),
+          }),
+        }, { allowHttpInDev: true });
+      } catch (err) {
+        await logEvent("warn", "salon", `Ambient IoT trigger failed: ${(err as Error).message}`, { appointmentId: p.appointmentId }, event.tenantId);
+      }
+    }
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.AppointmentReceptionCheckedIn, { id: p.customerId }, {
+      seed: `apt_checkin:${p.appointmentId}`,
+      source: "reception kiosk",
+    });
+  },
+
+  [EventTypes.AppointmentServiceCompleted]: async (event) => {
+    const p = zparse(event, PayloadSchemas[EventTypes.AppointmentServiceCompleted]);
+    const tenant = await tenantOf(event.tenantId);
+    const customer = await customerOf(event.tenantId, p.customerId);
+
+    // Reward points for service completion
+    await creditPoints(event.tenantId, {
+      customerId: p.customerId,
+      kind: "service_completed",
+      points: 50,
+      reason: "Appointment completed bonus",
+      idempotencyKey: `service_pts:${p.appointmentId}`,
+    });
+
+    // Generate referral code for rebooking discount
+    const discountCode = (await ensureReferralCode(event.tenantId, p.customerId, customer.name)) || "RETURN10";
+
+    const feedbackUrl = p.feedbackUrl || `https://${tenant.slug}.gsclientflow.app/public/feedback?email=${encodeURIComponent(customer.email)}`;
+
+    await sendChannelMessage({
+      tenant,
+      customer,
+      channel: "whatsapp",
+      kind: "transactional",
+      subject: `Thank you for visiting ${tenant.name}!`,
+      body: `Hi ${customer.name.split(" ")[0]}, thank you for visiting ${tenant.name}! Rate your experience: ${feedbackUrl}\n\nUse code *${discountCode}* for 10% off your next booking!`,
+      idempotencyKey: `apt_serv_done:${p.appointmentId}`,
+    }).catch(() => undefined);
+
+    await dispatchEventWorkflows(event.tenantId, EventTypes.AppointmentServiceCompleted, { id: p.customerId }, {
+      seed: `apt_done:${p.appointmentId}`,
+      source: "service completion",
     });
   },
 };

@@ -26,6 +26,7 @@ export const tenants = pgTable(
     slug: text("slug").notNull().unique(),
     name: text("name").notNull(),
     businessCategory: text("business_category").notNull().default("services"),
+    verticalType: text("vertical_type").notNull().default("GENERAL"),
     customDomain: text("custom_domain").unique(),
     domainVerifiedAt: timestamp("domain_verified_at", { withTimezone: true }),
     domainVerifyToken: text("domain_verify_token"),
@@ -236,6 +237,11 @@ export const appointments = pgTable(
     customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
     serviceId: text("service_id").references(() => services.id, { onDelete: "set null" }),
     staffId: text("staff_id").references(() => staff.id, { onDelete: "set null" }),
+    assignedStaffId: text("assigned_staff_id"),
+    preferences: text("preferences").notNull().default("{}"),
+    checkInStatus: text("check_in_status").notNull().default("SCHEDULED"),
+    checkedInAt: timestamp("checked_in_at", { withTimezone: true }),
+    reminder24hSentAt: timestamp("reminder_24h_sent_at", { withTimezone: true }),
     startAt: timestamp("start_at", { withTimezone: true }).notNull(),
     durationMin: integer("duration_min").notNull().default(30),
     status: text("status").notNull().default("scheduled"),
@@ -533,5 +539,95 @@ export const usageCounters = pgTable(
   },
   (table) => [
     uniqueIndex("usage_counters_tenant_metric_day_idx").on(table.tenantId, table.metric, table.day),
+  ]
+);
+
+// ---------------------------------------------------------------- vertical automations
+
+export const staffMembers = pgTable(
+  "staff_members",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    role: text("role").notNull().default("staff"),
+    phone: text("phone"),
+    specialties: text("specialties").notNull().default("[]"),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("staff_members_tenant_active_idx").on(table.tenantId, table.isActive),
+    index("staff_members_role_idx").on(table.tenantId, table.role),
+  ]
+);
+
+export const attendanceLogs = pgTable(
+  "attendance_logs",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    batchOrClass: text("batch_or_class").notNull(),
+    date: text("date").notNull(),
+    status: text("status").notNull().default("PRESENT"), // PRESENT | ABSENT | LATE | ON_LEAVE
+    guardianPhone: text("guardian_phone").notNull(),
+    notifiedAt: timestamp("notified_at", { withTimezone: true }),
+    guardianReplyStatus: text("guardian_reply_status").notNull().default("PENDING"), // PENDING | ACKNOWLEDGED_LEAVE | ACKNOWLEDGED_LATE | NO_REPLY
+    guardianReplyText: text("guardian_reply_text"),
+    followUpTaskId: text("follow_up_task_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("attendance_logs_tenant_date_idx").on(table.tenantId, table.date),
+    index("attendance_logs_batch_date_idx").on(table.tenantId, table.batchOrClass, table.date),
+    index("attendance_logs_customer_idx").on(table.customerId, table.date),
+    index("attendance_logs_reply_status_idx").on(table.tenantId, table.guardianReplyStatus),
+  ]
+);
+
+export const staffFollowUpTasks = pgTable(
+  "staff_follow_up_tasks",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    assignedToUserId: text("assigned_to_user_id").references(() => users.id, { onDelete: "set null" }),
+    taskType: text("task_type").notNull().default("ATTENDANCE_CALL"), // ATTENDANCE_CALL | GYM_RENEWAL_CALL | GENERAL
+    status: text("status").notNull().default("OPEN"), // OPEN | IN_PROGRESS | RESOLVED
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    notes: text("notes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("staff_follow_up_tasks_tenant_status_idx").on(table.tenantId, table.status, table.dueAt),
+    index("staff_follow_up_tasks_customer_idx").on(table.customerId),
+  ]
+);
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: text("id").primaryKey().$defaultFn(() => crypto.randomUUID()),
+    tenantId: text("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+    customerId: text("customer_id").notNull().references(() => customers.id, { onDelete: "cascade" }),
+    planName: text("plan_name").notNull(),
+    priceAmount: integer("price_amount").notNull().default(0),
+    startDate: timestamp("start_date", { withTimezone: true }).notNull().defaultNow(),
+    expiryDate: timestamp("expiry_date", { withTimezone: true }).notNull(),
+    paymentStatus: text("payment_status").notNull().default("PENDING"), // PAID | PENDING | OVERDUE
+    status: text("status").notNull().default("ACTIVE"), // ACTIVE | EXPIRING_SOON | EXPIRED | CANCELLED
+    lastReminderSentAt: timestamp("last_reminder_sent_at", { withTimezone: true }),
+    autoSyncSheetRowId: text("auto_sync_sheet_row_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    index("memberships_tenant_status_idx").on(table.tenantId, table.status, table.expiryDate),
+    index("memberships_customer_idx").on(table.customerId),
+    index("memberships_payment_status_idx").on(table.tenantId, table.paymentStatus),
   ]
 );

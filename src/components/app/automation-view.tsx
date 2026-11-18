@@ -5,13 +5,17 @@ import {
   Cake,
   CalendarClock,
   Check,
+  Dumbbell,
+  GraduationCap,
   Hourglass,
   ListChecks,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
+  Scissors,
   ScrollText,
+  Sparkles,
   UserX,
   Workflow as WorkflowIcon,
   X,
@@ -235,6 +239,7 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
   const [wfLoading, setWfLoading] = useState(true);
   const [runBusyId, setRunBusyId] = useState<string | null>(null);
   const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
+  const [blueprintBusy, setBlueprintBusy] = useState<string | null>(null);
 
   const loadWorkflows = useCallback(async () => {
     setWfLoading(true);
@@ -251,6 +256,41 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
   useEffect(() => {
     void loadWorkflows();
   }, [loadWorkflows]);
+
+  const deployBlueprint = async (blueprint: {
+    name: string;
+    category: string;
+    triggerType: string;
+    triggerEvent: string;
+    channel: string;
+    template: string;
+  }) => {
+    setBlueprintBusy(blueprint.category);
+    try {
+      await apiPost("/api/workflows", {
+        name: blueprint.name,
+        category: blueprint.category,
+        triggerType: blueprint.triggerType,
+        triggerEvent: blueprint.triggerEvent,
+        channel: blueprint.channel,
+        template: blueprint.template,
+        requireConsent: true,
+      });
+      await loadWorkflows();
+      toast({
+        title: "Blueprint Deployed!",
+        description: `Successfully activated ${blueprint.name}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Failed to deploy blueprint",
+        description: (err as Error).message,
+        variant: "destructive",
+      });
+    } finally {
+      setBlueprintBusy(null);
+    }
+  };
 
   const toggleActive = async (wf: Workflow, next: boolean) => {
     setToggleBusyId(wf.id);
@@ -509,6 +549,140 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
             >
               <Plus className="h-3.5 w-3.5" /> New workflow
             </Button>
+          </div>
+
+          {/* Multi-Vertical Automation Blueprints */}
+          <div className="space-y-3 rounded-lg border bg-gradient-to-r from-muted/50 via-background to-muted/30 p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2">
+                  <Sparkles className="h-4 w-4 text-[var(--brand)]" />
+                  Multi-Vertical Automation Blueprints
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Pre-configured, production-tested event pipelines for high-value verticals. 1-click activate into your transactional outbox engine.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {/* Coaching */}
+              <Card className="flex flex-col justify-between p-3.5 border-blue-500/20 bg-blue-500/5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="h-4 w-4 text-blue-600" />
+                    <span className="font-semibold text-xs">Coaching Attendance Escalation</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    WhatsApp parent alert on absence, 60m response window (1/Leave, 2/Late), and auto staff phone escalation.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px] font-mono">attendance.marked_absent</Badge>
+                  {workflows.some((w) => w.category === "coaching") ? (
+                    <Badge variant="secondary" className="text-[10px] text-emerald-600 bg-emerald-500/10">Active</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-blue-500/30 hover:bg-blue-500/10 text-blue-600"
+                      disabled={blueprintBusy === "coaching"}
+                      onClick={() =>
+                        deployBlueprint({
+                          name: "Coaching Absentee Parent Alert & Staff Escalation",
+                          category: "coaching",
+                          triggerType: "event",
+                          triggerEvent: "attendance.marked_absent",
+                          channel: "whatsapp",
+                          template:
+                            "Alert from {business}: Your ward {name} was marked absent today. Reply 1 for Leave or 2 for Late. If no response in 60m, our staff will call.",
+                        })
+                      }
+                    >
+                      {blueprintBusy === "coaching" ? "Deploying..." : "Deploy"}
+                    </Button>
+                  )}
+                </div>
+              </Card>
+
+              {/* Gym */}
+              <Card className="flex flex-col justify-between p-3.5 border-rose-500/20 bg-rose-500/5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Dumbbell className="h-4 w-4 text-rose-600" />
+                    <span className="font-semibold text-xs">Gym Expiry &amp; Owner Digest</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Multi-stage 7d/3d/1d WhatsApp renewal reminders with portal payment links and daily 08:00 AM owner digest.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px] font-mono">membership.expiring_soon</Badge>
+                  {workflows.some((w) => w.category === "gym") ? (
+                    <Badge variant="secondary" className="text-[10px] text-emerald-600 bg-emerald-500/10">Active</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-rose-500/30 hover:bg-rose-500/10 text-rose-600"
+                      disabled={blueprintBusy === "gym"}
+                      onClick={() =>
+                        deployBlueprint({
+                          name: "Gym Expiry Tracker & Owner Daily Digest",
+                          category: "gym",
+                          triggerType: "event",
+                          triggerEvent: "membership.expiring_soon",
+                          channel: "whatsapp",
+                          template:
+                            "Hi {name}, your gym membership at {business} is expiring soon. Click to renew and avoid disruption: https://gsclientflow.app/portal",
+                        })
+                      }
+                    >
+                      {blueprintBusy === "gym" ? "Deploying..." : "Deploy"}
+                    </Button>
+                  )}
+                </div>
+              </Card>
+
+              {/* Salon */}
+              <Card className="flex flex-col justify-between p-3.5 border-teal-500/20 bg-teal-500/5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <Scissors className="h-4 w-4 text-teal-600" />
+                    <span className="font-semibold text-xs">Smart Salon Ambient Visit</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    Stylist auto-matching by specialty, ambient IoT check-in preference cards, and post-service rebook rewards.
+                  </p>
+                </div>
+                <div className="mt-3 pt-2 border-t flex items-center justify-between">
+                  <Badge variant="outline" className="text-[10px] font-mono">appointment.booked_smart</Badge>
+                  {workflows.some((w) => w.category === "salon") ? (
+                    <Badge variant="secondary" className="text-[10px] text-emerald-600 bg-emerald-500/10">Active</Badge>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs border-teal-500/30 hover:bg-teal-500/10 text-teal-600"
+                      disabled={blueprintBusy === "salon"}
+                      onClick={() =>
+                        deployBlueprint({
+                          name: "Smart Salon Concierge & Ambient Check-In",
+                          category: "salon",
+                          triggerType: "event",
+                          triggerEvent: "appointment.booked_smart",
+                          channel: "whatsapp",
+                          template:
+                            "Hi {name}, your appointment at {business} is confirmed with your preferred stylist, music genre, and refreshment ready upon arrival!",
+                        })
+                      }
+                    >
+                      {blueprintBusy === "salon" ? "Deploying..." : "Deploy"}
+                    </Button>
+                  )}
+                </div>
+              </Card>
+            </div>
           </div>
 
           {wfLoading && !wfData ? (

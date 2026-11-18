@@ -16,6 +16,8 @@ import type { TenantSummary, EventCatalogEntry } from "@/lib/client/types";
 const DEMO_EMAILS: Record<string, string> = {
   "aurora-spa": "priya@auroraspa.example",
   "bright-dental": "dr.mehta@brightdental.example",
+  "apex-coaching": "director@apexcoaching.example",
+  "ironcore-gym": "owner@ironcoregym.example",
 };
 
 export function LoginScreen({
@@ -207,8 +209,8 @@ export function LoginScreen({
                     onKeyDown={(e) => e.key === "Enter" && handleLogin()}
                   />
                   <div className="text-xs text-muted-foreground">
-                    Demo accounts — {slug === "bright-dental" ? "dr.mehta@brightdental.example" : "priya@auroraspa.example"} (owner) ·
-                    platform@gsclientflow.app (cross-tenant demo admin, Aurora)
+                    Demo accounts — {DEMO_EMAILS[slug] ?? "priya@auroraspa.example"} (owner) ·
+                    platform@gsclientflow.app (cross-tenant demo admin)
                   </div>
                 </div>
 

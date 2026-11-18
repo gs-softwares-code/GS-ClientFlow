@@ -7,6 +7,7 @@ import { EventTypes } from "@/server/events/contracts";
 import { executeCampaign } from "@/server/services/campaigns";
 import { runDueScans } from "@/server/events/scheduler";
 import { logEvent } from "@/server/logs";
+import { installVerticalBlueprints } from "@/server/services/workflow-engine";
 
 /** Deterministic demo dataset (mulberry32) — aggregates are computed from the
  *  generated visit history so all analytics are internally consistent. */
@@ -39,7 +40,7 @@ function inrToCents(rupees: number): number {
 }
 
 export async function reseed(): Promise<{ tenants: number; customers: number }> {
-  const wipeOrder = ["session", "usageCounter", "auditLog", "systemLog", "workflowRun", "workflow", "scheduledAction", "outboxEvent", "message", "campaign", "coupon", "offerRedemption", "rewardTransaction", "referralCode", "offer", "appointment", "feedback", "visit", "customerTag", "tag", "segment", "service", "staff", "user", "tenant"];
+  const wipeOrder = ["staffFollowUpTask", "attendanceLog", "membership", "staffMember", "session", "usageCounter", "auditLog", "systemLog", "workflowRun", "workflow", "scheduledAction", "outboxEvent", "message", "campaign", "coupon", "offerRedemption", "rewardTransaction", "referralCode", "offer", "appointment", "feedback", "visit", "customerTag", "tag", "segment", "service", "staff", "user", "tenant"];
   for (const model of wipeOrder) {
     await (db as unknown as Record<string, { deleteMany: () => Promise<unknown> }>)[model].deleteMany();
   }
@@ -52,8 +53,9 @@ export async function reseed(): Promise<{ tenants: number; customers: number }> 
   const aurora = await db.tenant.create({
     data: {
       slug: "aurora-spa",
-      name: "Aurora Spa & Wellness",
+      name: "Aurora Spa & Salon",
       businessCategory: "salon_spa",
+      verticalType: "SALON",
       brandColor: "#0f766e",
       logoText: "AS",
       plan: "growth",
@@ -119,6 +121,40 @@ export async function reseed(): Promise<{ tenants: number; customers: number }> 
       { name: "Rahul Verma", role: "staff", availability: toJson({}) },
     ].map((s) => db.staff.create({ data: { tenantId: aurora.id, ...s } }))
   );
+
+  const staffMembersA = await Promise.all([
+    db.staffMember.create({
+      data: {
+        tenantId: aurora.id,
+        name: "Elena Rostova",
+        role: "Senior Stylist",
+        phone: "+919811122233",
+        specialties: toJson(["Balayage", "Fade Cut", "Hair Spa", "Blowout"]),
+        isActive: true,
+      },
+    }),
+    db.staffMember.create({
+      data: {
+        tenantId: aurora.id,
+        name: "Marco Silva",
+        role: "Master Barber",
+        phone: "+919822233344",
+        specialties: toJson(["Beard Sculpt", "Classic Fade", "Pompadour", "Hot Towel Shave"]),
+        isActive: true,
+      },
+    }),
+    db.staffMember.create({
+      data: {
+        tenantId: aurora.id,
+        name: "Priya Sharma",
+        role: "Lead Aesthetician",
+        phone: "+919833344455",
+        specialties: toJson(["Signature Facial", "Skin Consultation", "Deep Tissue Massage"]),
+        isActive: true,
+      },
+    }),
+  ]);
+  await installVerticalBlueprints(aurora.id, "SALON");
 
   // ---- Aurora customers with realistic visit histories
   const AURORA_N = 42;
@@ -307,6 +343,15 @@ export async function reseed(): Promise<{ tenants: number; customers: number }> 
         customerId: cust.id,
         serviceId: servicesA[i % servicesA.length].id,
         staffId: staffA[i % staffA.length].id,
+        assignedStaffId: staffMembersA[i % staffMembersA.length].id,
+        preferences: toJson({
+          haircutStyle: i % 2 === 0 ? "Fade Cut" : "Signature Facial",
+          musicGenre: i % 2 === 0 ? "Lo-Fi Beats" : "Acoustic Chill",
+          beverage: i % 2 === 0 ? "Espresso" : "Green Tea",
+          notes: "Prefers quiet consultation and sensitive skin products",
+        }),
+        checkInStatus: i === 0 ? "checked_in" : "booked",
+        checkedInAt: i === 0 ? new Date() : null,
         startAt: dayOffset(i < 2 ? 1 : 3 + i * 2, 11 + (i % 7)),
         durationMin: servicesA[i % servicesA.length].durationMin,
         status: i % 2 === 0 ? "scheduled" : "confirmed",
@@ -585,7 +630,161 @@ export async function reseed(): Promise<{ tenants: number; customers: number }> 
     await publish(db, { tenantId: aurora.id, type: EventTypes.AppointmentBooked, payload: { appointmentId: deadId, customerId: deadCustomer.id, startAtMs: dayOffset(3, 15).getTime() }, dedupeKey: `aptbook:${deadId}` });
   }
 
-  await logEvent("info", "seed", `Demo dataset seeded: 2 tenants, ${totalCustomers} customers`, { totalCustomers });
+  // ============================================================ Tenant C: Coaching Vertical (Apex IIT-JEE Academy)
+  const apexSettings = defaultSettings("education");
+  const apex = await db.tenant.create({
+    data: {
+      slug: "apex-coaching",
+      name: "Apex IIT-JEE Academy",
+      businessCategory: "education",
+      verticalType: "COACHING",
+      brandColor: "#2563eb",
+      logoText: "AC",
+      plan: "growth",
+      timezone: "Asia/Calcutta",
+      settings: toJson({
+        ...apexSettings,
+        channels: { ...apexSettings.channels, whatsapp: { ...apexSettings.channels.whatsapp, enabled: true } },
+      }),
+    },
+  });
+
+  await db.user.createMany({
+    data: [
+      { tenantId: apex.id, email: "director@apexcoaching.example", name: "Prof. R.K. Sharma", role: "owner" },
+      { tenantId: apex.id, email: "staff@apexcoaching.example", name: "Sunita Verma", role: "staff" },
+    ],
+  });
+
+  const apexStudentsData = [
+    { name: "Aarav Sharma", email: "aarav.student@apexcoaching.example", phone: "+919899112233", guardian: "Sunil Sharma", guardianPhone: "+919811223344" },
+    { name: "Ananya Iyer", email: "ananya.student@apexcoaching.example", phone: "+919899223344", guardian: "Meenakshi Iyer", guardianPhone: "+919822334455" },
+    { name: "Rohan Patel", email: "rohan.student@apexcoaching.example", phone: "+919899334455", guardian: "Dinesh Patel", guardianPhone: "+919833445566" },
+    { name: "Kavya Reddy", email: "kavya.student@apexcoaching.example", phone: "+919899445566", guardian: "Venkat Reddy", guardianPhone: "+919844556677" },
+  ];
+
+  const apexCustomers: { id: string; name: string; guardian: string; guardianPhone: string }[] = [];
+  for (const stu of apexStudentsData) {
+    const cust = await db.customer.create({
+      data: {
+        tenantId: apex.id,
+        publicId: publicId(),
+        name: stu.name,
+        email: stu.email,
+        phone: stu.phone,
+        source: "walk_in",
+        consents: toJson({ marketing: true, email: true, sms: true, whatsapp: true }),
+        notes: `Guardian: ${stu.guardian} (${stu.guardianPhone}) · Batch: JEE Advanced 2027`,
+      },
+    });
+    apexCustomers.push({ ...stu, id: cust.id });
+    totalCustomers += 1;
+  }
+
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yesterdayStr = new Date(Date.now() - 86400_000).toISOString().slice(0, 10);
+
+  // Yesterday's attendance logs
+  await db.attendanceLog.createMany({
+    data: [
+      { tenantId: apex.id, customerId: apexCustomers[0].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[0].guardianPhone, date: yesterdayStr, status: "PRESENT", guardianReplyStatus: "PENDING" },
+      { tenantId: apex.id, customerId: apexCustomers[1].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[1].guardianPhone, date: yesterdayStr, status: "PRESENT", guardianReplyStatus: "PENDING" },
+      { tenantId: apex.id, customerId: apexCustomers[2].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[2].guardianPhone, date: yesterdayStr, status: "ABSENT", guardianReplyStatus: "ACKNOWLEDGED_LEAVE", guardianReplyText: "1 - Leave due to fever" },
+      { tenantId: apex.id, customerId: apexCustomers[3].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[3].guardianPhone, date: yesterdayStr, status: "PRESENT", guardianReplyStatus: "PENDING" },
+    ],
+  });
+
+  // Today's attendance logs
+  await db.attendanceLog.createMany({
+    data: [
+      { tenantId: apex.id, customerId: apexCustomers[0].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[0].guardianPhone, date: todayStr, status: "ABSENT", guardianReplyStatus: "NO_REPLY" },
+      { tenantId: apex.id, customerId: apexCustomers[1].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[1].guardianPhone, date: todayStr, status: "PRESENT", guardianReplyStatus: "PENDING" },
+      { tenantId: apex.id, customerId: apexCustomers[2].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[2].guardianPhone, date: todayStr, status: "ABSENT", guardianReplyStatus: "ACKNOWLEDGED_LEAVE", guardianReplyText: "1 - Doctor appointment" },
+      { tenantId: apex.id, customerId: apexCustomers[3].id, batchOrClass: "JEE-2027", guardianPhone: apexCustomers[3].guardianPhone, date: todayStr, status: "PRESENT", guardianReplyStatus: "PENDING" },
+    ],
+  });
+
+  // Follow-up task for Aarav (urgent: parent unnotified)
+  await db.staffFollowUpTask.create({
+    data: {
+      tenantId: apex.id,
+      customerId: apexCustomers[0].id,
+      taskType: "ATTENDANCE_CALL",
+      status: "OPEN",
+      dueAt: new Date(Date.now() + 2 * 3600_000),
+      notes: "Parent (Sunil Sharma) did not reply to WhatsApp absentee alert after 60 mins. Staff phone escalation required.",
+    },
+  });
+
+  await installVerticalBlueprints(apex.id, "COACHING");
+
+  // ============================================================ Tenant D: Gym Vertical (IronCore Fitness)
+  const gymSettings = defaultSettings("fitness");
+  const ironcore = await db.tenant.create({
+    data: {
+      slug: "ironcore-gym",
+      name: "IronCore Fitness",
+      businessCategory: "fitness",
+      verticalType: "GYM",
+      brandColor: "#dc2626",
+      logoText: "IC",
+      plan: "growth",
+      timezone: "Asia/Calcutta",
+      settings: toJson({
+        ...gymSettings,
+        channels: { ...gymSettings.channels, whatsapp: { ...gymSettings.channels.whatsapp, enabled: true } },
+      }),
+    },
+  });
+
+  await db.user.createMany({
+    data: [
+      { tenantId: ironcore.id, email: "owner@ironcoregym.example", name: "Vikram Malhotra", role: "owner" },
+      { tenantId: ironcore.id, email: "coach@ironcoregym.example", name: "Sarah Jenkins", role: "staff" },
+    ],
+  });
+
+  const gymMembersData = [
+    { name: "Vikram Kapoor", email: "vikram.k@example.com", plan: "Annual Pro Strength", daysLeft: 1, isPaid: true, status: "EXPIRING_SOON", renewalPrice: 24000 },
+    { name: "Meera Gupta", email: "meera.g@example.com", plan: "6-Month Crossfit", daysLeft: 3, isPaid: true, status: "EXPIRING_SOON", renewalPrice: 15000 },
+    { name: "Rahul Joshi", email: "rahul.j@example.com", plan: "Quarterly Standard", daysLeft: 7, isPaid: true, status: "EXPIRING_SOON", renewalPrice: 8500 },
+    { name: "Siddharth Bose", email: "siddharth.b@example.com", plan: "Monthly Flex", daysLeft: -5, isPaid: false, status: "EXPIRED", renewalPrice: 3500 },
+    { name: "Pooja Verma", email: "pooja.v@example.com", plan: "Annual VIP Unlimited", daysLeft: 180, isPaid: true, status: "ACTIVE", renewalPrice: 30000 },
+  ];
+
+  for (const m of gymMembersData) {
+    const cust = await db.customer.create({
+      data: {
+        tenantId: ironcore.id,
+        publicId: publicId(),
+        name: m.name,
+        email: m.email,
+        phone: `+9196${String(10000000 + Math.floor(r() * 89999999)).slice(0, 8)}`,
+        source: "walk_in",
+        consents: toJson({ marketing: true, email: true, sms: true, whatsapp: true }),
+      },
+    });
+    totalCustomers += 1;
+
+    const startDate = dayOffset(m.daysLeft - 30);
+    const expiryDate = dayOffset(m.daysLeft);
+    await db.membership.create({
+      data: {
+        tenantId: ironcore.id,
+        customerId: cust.id,
+        planName: m.plan,
+        priceAmount: inrToCents(m.renewalPrice),
+        startDate,
+        expiryDate,
+        paymentStatus: m.isPaid ? "PAID" : "OVERDUE",
+        status: m.status,
+      },
+    });
+  }
+
+  await installVerticalBlueprints(ironcore.id, "GYM");
+
+  await logEvent("info", "seed", `Demo dataset seeded: 4 tenants, ${totalCustomers} customers`, { totalCustomers });
   await runDueScans().catch(() => undefined); // prime birthday/inactive events immediately
-  return { tenants: 2, customers: totalCustomers };
+  return { tenants: 4, customers: totalCustomers };
 }

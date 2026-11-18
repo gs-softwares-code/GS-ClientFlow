@@ -11,6 +11,8 @@ export async function bookAppointment(
     customerId: string;
     serviceId?: string | null;
     staffId?: string | null;
+    assignedStaffId?: string | null;
+    preferences?: Record<string, unknown>;
     startAt: string;
     note?: string | null;
   }
@@ -42,25 +44,95 @@ export async function bookAppointment(
     }
   }
 
+  // Smart Salon: Auto-Stylist Assignment matching specialties & availability
+  let finalStaffId = input.staffId ?? null;
+  let finalAssignedStaffId = input.assignedStaffId ?? null;
+
+  if (!finalStaffId && !finalAssignedStaffId) {
+    const availableStaff = await db.staffMember.findMany({
+      where: { tenantId, isActive: true },
+    });
+
+    if (availableStaff.length > 0) {
+      const targetQuery = (
+        (input.preferences?.haircutStyle as string) ||
+        service?.name ||
+        ""
+      ).toLowerCase();
+
+      // Check which staff members are currently occupied during this slot
+      const busyAppointments = await db.appointment.findMany({
+        where: {
+          tenantId,
+          assignedStaffId: { in: availableStaff.map((s) => s.id) },
+          status: { in: ["scheduled", "confirmed", "CHECKED_IN", "IN_SERVICE"] },
+          startAt: { lt: end },
+        },
+        select: { assignedStaffId: true, startAt: true, durationMin: true },
+      });
+
+      const busyStaffIds = new Set(
+        busyAppointments
+          .filter((a) => new Date(a.startAt.getTime() + a.durationMin * 60_000) > start)
+          .map((a) => a.assignedStaffId)
+      );
+
+      const nonBusyStaff = availableStaff.filter((s) => !busyStaffIds.has(s.id));
+      const matched =
+        nonBusyStaff.find((s) => {
+          try {
+            const specs: string[] = JSON.parse(s.specialties);
+            return specs.some((sp) => targetQuery.includes(sp.toLowerCase()) || sp.toLowerCase().includes(targetQuery));
+          } catch {
+            return false;
+          }
+        }) || nonBusyStaff[0] || availableStaff[0];
+
+      if (matched) {
+        finalAssignedStaffId = matched.id;
+      }
+    }
+  }
+
   return db.$transaction(async (tx) => {
     const created = await tx.appointment.create({
       data: {
         tenantId,
         customerId: input.customerId,
         serviceId: service?.id ?? null,
-        staffId: input.staffId ?? null,
+        staffId: finalStaffId,
+        assignedStaffId: finalAssignedStaffId,
+        preferences: input.preferences ? JSON.stringify(input.preferences) : "{}",
+        checkInStatus: "SCHEDULED",
         startAt: start,
         durationMin,
         status: "scheduled",
         note: input.note?.trim() || null,
       },
     });
+
     await publish(tx, {
       tenantId,
       type: EventTypes.AppointmentBooked,
       payload: { appointmentId: created.id, customerId: input.customerId, startAtMs: start.getTime() },
       dedupeKey: `aptbook:${created.id}`,
     });
+
+    // Smart appointment booking event with ambient preferences
+    if (finalAssignedStaffId || input.preferences) {
+      await publish(tx, {
+        tenantId,
+        type: EventTypes.AppointmentBookedSmart,
+        payload: {
+          appointmentId: created.id,
+          customerId: input.customerId,
+          assignedStaffId: finalAssignedStaffId,
+          preferences: input.preferences ?? {},
+        },
+        dedupeKey: `aptbook_smart:${created.id}`,
+      });
+    }
+
     return created;
   });
 }
@@ -86,9 +158,26 @@ export async function cancelAppointment(tenantId: string, appointmentId: string,
 export async function setAppointmentStatus(tenantId: string, appointmentId: string, status: string) {
   const appt = await db.appointment.findFirst({ where: { id: appointmentId, tenantId } });
   if (!appt) return null;
-  await db.appointment.update({ where: { id: appointmentId }, data: { status } });
+  const updateData: Record<string, unknown> = { status, updatedAt: new Date() };
   if (status === "completed") {
-    // post-appointment follow-up: feedback request 2 hours later
+    updateData.checkInStatus = "COMPLETED";
+  }
+  await db.appointment.update({ where: { id: appointmentId }, data: updateData });
+
+  if (status === "completed") {
+    // 1. Post-appointment retention loop: dispatch feedback & rebook discount
+    await publish(db, {
+      tenantId,
+      type: EventTypes.AppointmentServiceCompleted,
+      payload: {
+        appointmentId: appt.id,
+        customerId: appt.customerId,
+        feedbackUrl: `/api/public/feedback?appt=${appt.id}`,
+      },
+      dedupeKey: `apt_completed:${appt.id}`,
+    });
+
+    // 2. Scheduled follow-up action
     await db.scheduledAction.create({
       data: {
         tenantId,
@@ -99,6 +188,57 @@ export async function setAppointmentStatus(tenantId: string, appointmentId: stri
     });
   }
   return true;
+}
+
+/**
+ * Reception Tablet Check-In — transitions client to CHECKED_IN,
+ * alerts assigned stylist and activates salon ambient preferences.
+ */
+export async function receptionCheckIn(tenantId: string, appointmentId: string) {
+  const appt = await db.appointment.findFirst({
+    where: { id: appointmentId, tenantId },
+    include: {
+      customer: { select: { id: true, name: true, phone: true, email: true } },
+      service: { select: { id: true, name: true, priceCents: true } },
+      assignedStaff: { select: { id: true, name: true, role: true, phone: true } },
+    },
+  });
+  if (!appt) throw Object.assign(new Error("Appointment not found"), { code: "not_found" });
+
+  const now = new Date();
+  const updated = await db.appointment.update({
+    where: { id: appointmentId },
+    data: {
+      checkInStatus: "CHECKED_IN",
+      checkedInAt: now,
+      status: "confirmed",
+      updatedAt: now,
+    },
+    include: {
+      customer: { select: { id: true, name: true, phone: true, email: true } },
+      service: { select: { id: true, name: true, priceCents: true } },
+      assignedStaff: { select: { id: true, name: true, role: true, phone: true } },
+    },
+  });
+
+  let parsedPrefs = {};
+  try {
+    parsedPrefs = JSON.parse(appt.preferences);
+  } catch {}
+
+  await publish(db, {
+    tenantId,
+    type: EventTypes.AppointmentReceptionCheckedIn,
+    payload: {
+      appointmentId: appt.id,
+      customerId: appt.customerId,
+      assignedStaffId: appt.assignedStaffId,
+      preferences: parsedPrefs,
+    },
+    dedupeKey: `reception_checkin:${appt.id}:${now.getTime()}`,
+  });
+
+  return updated;
 }
 
 export async function listAppointments(
@@ -122,6 +262,7 @@ export async function listAppointments(
       customer: { select: { id: true, name: true, email: true, phone: true } },
       service: { select: { id: true, name: true } },
       staff: { select: { id: true, name: true } },
+      assignedStaff: { select: { id: true, name: true, role: true } },
     },
   });
 }

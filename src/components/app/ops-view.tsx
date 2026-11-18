@@ -2,17 +2,25 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  AlertCircle,
   Check,
+  CheckCircle2,
   Clock,
   Cpu,
   Database,
+  Dumbbell,
+  FileSpreadsheet,
   Gauge,
+  GraduationCap,
   ListChecks,
+  PhoneCall,
   Play,
   RefreshCw,
   ScanSearch,
   ScrollText,
+  Send,
   ShieldCheck,
+  Sparkles,
   TriangleAlert,
   Zap,
 } from "lucide-react";
@@ -20,15 +28,17 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
-import { apiGet, apiPost } from "@/lib/client/api";
-import { formatDateTime, timeAgo } from "@/lib/client/format";
-import type { AppCtx } from "@/lib/client/types";
+import { apiGet, apiPatch, apiPost } from "@/lib/client/api";
+import { formatDate, formatDateTime, formatINR, timeAgo } from "@/lib/client/format";
+import type { AppCtx, AttendanceLog, StaffFollowUpTask, Membership } from "@/lib/client/types";
 
 /* ---------- DTOs (mirrors of the API responses) ---------- */
 
@@ -263,6 +273,12 @@ export default function OpsView({ ctx }: { ctx: AppCtx }) {
             <TabsTrigger value="worker" className="shrink-0 px-3">
               Worker &amp; queue
             </TabsTrigger>
+            <TabsTrigger value="attendance" className="shrink-0 px-3 flex items-center gap-1.5">
+              <GraduationCap className="h-3.5 w-3.5" /> Attendance Desk
+            </TabsTrigger>
+            <TabsTrigger value="memberships" className="shrink-0 px-3 flex items-center gap-1.5">
+              <Dumbbell className="h-3.5 w-3.5" /> Membership Ledger
+            </TabsTrigger>
             <TabsTrigger value="security" className="shrink-0 px-3">
               Security tests
             </TabsTrigger>
@@ -428,6 +444,16 @@ export default function OpsView({ ctx }: { ctx: AppCtx }) {
                 </CardContent>
               </Card>
             </div>
+          </TabsContent>
+
+          {/* ------------------------------------------------------ Attendance Desk (Coaching Vertical) */}
+          <TabsContent value="attendance" className="space-y-4 pt-2">
+            <AttendanceDeskTab ctx={ctx} />
+          </TabsContent>
+
+          {/* ------------------------------------------------------ Membership Ledger (Gym Vertical) */}
+          <TabsContent value="memberships" className="space-y-4 pt-2">
+            <MembershipLedgerTab ctx={ctx} />
           </TabsContent>
 
           {/* ------------------------------------------------------ Security tests */}
@@ -636,6 +662,517 @@ export default function OpsView({ ctx }: { ctx: AppCtx }) {
           </TabsContent>
         </Tabs>
       )}
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Attendance Desk & Follow-Up Call Queue (Coaching Vertical)                */
+/* ------------------------------------------------------------------------- */
+
+function AttendanceDeskTab({ ctx }: { ctx: AppCtx }) {
+  const { toast } = useToast();
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [batch, setBatch] = useState("JEE-2027");
+  const [logs, setLogs] = useState<AttendanceLog[]>([]);
+  const [tasks, setTasks] = useState<StaffFollowUpTask[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [markingId, setMarkingId] = useState<string | null>(null);
+  const [resolvingId, setResolvingId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiGet<{ logs: AttendanceLog[]; tasks: StaffFollowUpTask[] }>(
+        `/api/attendance?date=${encodeURIComponent(date)}&batchOrClass=${encodeURIComponent(batch)}&includeTasks=true`
+      );
+      setLogs(res.logs ?? []);
+      setTasks(res.tasks ?? []);
+    } catch (err) {
+      toast({ title: "Failed to load attendance", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }, [date, batch, toast]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleMark = async (logId: string, customerId: string, status: "PRESENT" | "ABSENT" | "LATE", guardianPhone: string) => {
+    setMarkingId(customerId);
+    try {
+      await apiPost("/api/attendance", {
+        action: "mark",
+        customerId,
+        batchOrClass: batch,
+        date,
+        status,
+        guardianPhone,
+      });
+      toast({
+        title: `Marked as ${status}`,
+        description: status === "ABSENT" ? "Parent alert dispatched with 60-min reply window." : "Attendance logged.",
+      });
+      await loadData();
+    } catch (err) {
+      toast({ title: "Could not mark attendance", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setMarkingId(null);
+    }
+  };
+
+  const handleResolveTask = async (taskId: string) => {
+    setResolvingId(taskId);
+    try {
+      await apiPost("/api/attendance", {
+        action: "resolve_task",
+        taskId,
+        notes: "Guardian reached via telephone call. Absence validated.",
+      });
+      toast({ title: "Escalation Call Resolved", description: "Task closed and audit event recorded." });
+      await loadData();
+    } catch (err) {
+      toast({ title: "Failed to resolve task", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setResolvingId(null);
+    }
+  };
+
+  const presentCount = logs.filter((l) => l.status === "PRESENT").length;
+  const absentCount = logs.filter((l) => l.status === "ABSENT").length;
+  const unrepliedCount = logs.filter((l) => l.status === "ABSENT" && (l.guardianReplyStatus === "NO_REPLY" || l.guardianReplyStatus === "PENDING")).length;
+
+  return (
+    <div className="space-y-4">
+      {/* Top Filter Bar */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="att-date" className="text-xs">Roster Date</Label>
+            <Input id="att-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-8 text-xs" />
+          </div>
+          <div className="space-y-1">
+            <Label htmlFor="att-batch" className="text-xs">Class / Batch</Label>
+            <Input id="att-batch" value={batch} onChange={(e) => setBatch(e.target.value)} placeholder="e.g. JEE-2027" className="h-8 text-xs w-36" />
+          </div>
+          <Button variant="outline" size="sm" className="h-8 mt-4 gap-1.5" disabled={loading} onClick={() => void loadData()}>
+            <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Metrics Bar */}
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Card className="p-3">
+          <div className="text-xs text-muted-foreground">Total Students Logged</div>
+          <div className="text-xl font-bold">{logs.length}</div>
+        </Card>
+        <Card className="p-3 border-emerald-500/20 bg-emerald-500/5">
+          <div className="text-xs text-emerald-600">Present Today</div>
+          <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300">{presentCount}</div>
+        </Card>
+        <Card className="p-3 border-rose-500/20 bg-rose-500/5">
+          <div className="text-xs text-rose-600">Absent / Escalated</div>
+          <div className="text-xl font-bold text-rose-700 dark:text-rose-300">{absentCount}</div>
+        </Card>
+        <Card className="p-3 border-amber-500/20 bg-amber-500/5">
+          <div className="text-xs text-amber-600">Unreplied Guardian Alerts</div>
+          <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{unrepliedCount}</div>
+        </Card>
+      </div>
+
+      {/* Open Staff Call Queue Escalations */}
+      {tasks.length > 0 && (
+        <Card className="border-rose-500/30 bg-rose-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2 text-rose-700 dark:text-rose-300">
+              <PhoneCall className="h-4 w-4" />
+              Staff Follow-Up Call Queue ({tasks.length} pending)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Parent did not reply to WhatsApp alert within 60 minutes. Front-desk phone escalation is required.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-2">
+              {tasks.map((task) => (
+                <div key={task.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-background p-3 text-xs">
+                  <div>
+                    <div className="font-semibold text-sm flex items-center gap-2">
+                      {task.customer?.name ?? "Student"}
+                      <Badge variant="outline" className="text-[10px] text-rose-600 border-rose-300">URGENT CALL</Badge>
+                    </div>
+                    <div className="text-muted-foreground mt-0.5">
+                      Guardian Phone: <span className="font-mono text-foreground font-medium">{task.customer?.phone ?? "N/A"}</span> · Due: {formatDateTime(task.dueAt)}
+                    </div>
+                    {task.notes && <div className="text-[11px] text-muted-foreground italic mt-1">{task.notes}</div>}
+                  </div>
+                  <Button
+                    size="sm"
+                    className="h-8 gap-1.5 bg-rose-600 text-white hover:bg-rose-700 text-xs"
+                    disabled={resolvingId === task.id}
+                    onClick={() => handleResolveTask(task.id)}
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    {resolvingId === task.id ? "Resolving..." : "Mark Handled"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Attendance Roster Grid */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">Attendance Log &amp; Guardian Reply Status</CardTitle>
+          <CardDescription className="text-xs">
+            1-click toggle student attendance status. Marking absent triggers transactional outbox event with auto-parent WhatsApp alert.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+              No attendance logs found for batch &apos;{batch}&apos; on {date}.
+            </div>
+          ) : (
+            <div className="rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Student Name</TableHead>
+                    <TableHead>Guardian Phone</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Parent WhatsApp Reply</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {logs.map((log) => {
+                    const isMarking = markingId === log.customerId;
+                    return (
+                      <TableRow key={log.id}>
+                        <TableCell className="font-medium text-xs">
+                          {log.customer?.name ?? "Student"}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs text-muted-foreground">
+                          {log.guardianPhone || log.customer?.phone || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={log.status === "PRESENT" ? "secondary" : "destructive"}
+                            className="text-[10px]"
+                          >
+                            {log.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          {log.guardianReplyStatus === "ACKNOWLEDGED_LEAVE" ? (
+                            <Badge className="bg-emerald-500/10 text-emerald-600 border-emerald-500/30 text-[10px]">
+                              Replied 1: Leave
+                            </Badge>
+                          ) : log.guardianReplyStatus === "ACKNOWLEDGED_LATE" ? (
+                            <Badge className="bg-blue-500/10 text-blue-600 border-blue-500/30 text-[10px]">
+                              Replied 2: Late
+                            </Badge>
+                          ) : log.guardianReplyStatus === "NO_REPLY" ? (
+                            <Badge variant="destructive" className="text-[10px]">
+                              No Reply (Staff Escalation)
+                            </Badge>
+                          ) : log.status === "ABSENT" ? (
+                            <Badge variant="outline" className="text-[10px] text-amber-600 border-amber-300">
+                              Waiting 60m
+                            </Badge>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">—</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant={log.status === "PRESENT" ? "default" : "outline"}
+                              className="h-7 text-xs px-2.5"
+                              disabled={isMarking}
+                              onClick={() => handleMark(log.id, log.customerId, "PRESENT", log.guardianPhone)}
+                            >
+                              Present
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={log.status === "ABSENT" ? "destructive" : "outline"}
+                              className="h-7 text-xs px-2.5"
+                              disabled={isMarking}
+                              onClick={() => handleMark(log.id, log.customerId, "ABSENT", log.guardianPhone)}
+                            >
+                              Absent
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant={log.status === "LATE" ? "secondary" : "outline"}
+                              className="h-7 text-xs px-2.5"
+                              disabled={isMarking}
+                              onClick={() => handleMark(log.id, log.customerId, "LATE", log.guardianPhone)}
+                            >
+                              Late
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
+/* Membership & Renewal Ledger (Gym Vertical)                                */
+/* ------------------------------------------------------------------------- */
+
+function MembershipLedgerTab({ ctx }: { ctx: AppCtx }) {
+  const { toast } = useToast();
+  const [memberships, setMemberships] = useState<Membership[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "expiring" | "overdue" | "active">("all");
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const loadData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await apiGet<{ memberships: Membership[] }>("/api/memberships");
+      setMemberships(res.memberships ?? []);
+    } catch (err) {
+      toast({ title: "Failed to load memberships", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleSendDailySummary = async () => {
+    setSummaryBusy(true);
+    try {
+      const res = await apiPost<{ success: boolean; digest: { activeCount: number; expiringCount: number; pendingDuesAmount: number } }>(
+        "/api/memberships",
+        { action: "daily_summary" }
+      );
+      toast({
+        title: "Daily Owner Digest Dispatched!",
+        description: `Metrics: ${res.digest.activeCount} active, ${res.digest.expiringCount} expiring soon, ${formatINR(res.digest.pendingDuesAmount)} overdue dues.`,
+      });
+    } catch (err) {
+      toast({ title: "Failed to send summary", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setSummaryBusy(false);
+    }
+  };
+
+  const handleTogglePayment = async (membershipId: string, currentStatus: "PAID" | "PENDING" | "OVERDUE") => {
+    setTogglingId(membershipId);
+    const nextStatus = currentStatus === "PAID" ? "OVERDUE" : "PAID";
+    try {
+      await apiPatch(`/api/memberships/${encodeURIComponent(membershipId)}/payment`, {
+        paymentStatus: nextStatus,
+      });
+      toast({
+        title: "Payment Status Updated",
+        description: `Membership marked as ${nextStatus}.`,
+      });
+      await loadData();
+    } catch (err) {
+      toast({ title: "Failed to update payment", description: (err as Error).message, variant: "destructive" });
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  const now = Date.now();
+  const activeCount = memberships.filter((m) => m.status === "ACTIVE").length;
+  const expiringCount = memberships.filter((m) => {
+    const exp = new Date(m.expiryDate).getTime();
+    return exp > now && exp - now <= 7 * 86400_000;
+  }).length;
+  const overdueCount = memberships.filter((m) => m.paymentStatus === "OVERDUE").length;
+
+  const filtered = memberships.filter((m) => {
+    if (filter === "all") return true;
+    if (filter === "expiring") {
+      const exp = new Date(m.expiryDate).getTime();
+      return exp > now && exp - now <= 7 * 86400_000;
+    }
+    if (filter === "overdue") return m.paymentStatus === "OVERDUE";
+    if (filter === "active") return m.status === "ACTIVE";
+    return true;
+  });
+
+  return (
+    <div className="space-y-4">
+      {/* Metric Cards & Summary Action */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Gym Membership Ledger &amp; Renewal Engine</h2>
+          <p className="text-xs text-muted-foreground">
+            Automated 7d/3d/1d expiry reminders, renewal payment reconciliation, and daily owner digest.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            className="h-8 gap-1.5 bg-rose-600 text-white hover:bg-rose-700 text-xs"
+            disabled={summaryBusy}
+            onClick={handleSendDailySummary}
+          >
+            <Send className="h-3.5 w-3.5" />
+            {summaryBusy ? "Sending Digest..." : "Send Daily Owner Digest"}
+          </Button>
+          <Button variant="outline" size="sm" className="h-8 gap-1 text-xs" onClick={() => void loadData()}>
+            <RefreshCw className={`h-3 w-3 ${loading ? "animate-spin" : ""}`} /> Refresh
+          </Button>
+        </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-4">
+        <Card className="p-3">
+          <div className="text-xs text-muted-foreground">Active Members</div>
+          <div className="text-xl font-bold">{activeCount}</div>
+        </Card>
+        <Card className="p-3 border-amber-500/20 bg-amber-500/5">
+          <div className="text-xs text-amber-600">Expiring in 7 Days</div>
+          <div className="text-xl font-bold text-amber-700 dark:text-amber-300">{expiringCount}</div>
+        </Card>
+        <Card className="p-3 border-rose-500/20 bg-rose-500/5">
+          <div className="text-xs text-rose-600">Overdue Payment Dues</div>
+          <div className="text-xl font-bold text-rose-700 dark:text-rose-300">{overdueCount}</div>
+        </Card>
+        <Card className="p-3 border-emerald-500/20 bg-emerald-500/5">
+          <div className="text-xs text-emerald-600 flex items-center gap-1.5">
+            <FileSpreadsheet className="h-3.5 w-3.5" /> Google Sheets Sync
+          </div>
+          <div className="text-sm font-semibold text-emerald-700 dark:text-emerald-300 mt-1">Live SSRF-Protected</div>
+        </Card>
+      </div>
+
+      {/* Filter Chips */}
+      <div className="flex flex-wrap items-center gap-2">
+        {(["all", "expiring", "overdue", "active"] as const).map((k) => (
+          <Button
+            key={k}
+            variant={filter === k ? "default" : "outline"}
+            size="sm"
+            className="h-7 text-xs capitalize"
+            onClick={() => setFilter(k)}
+          >
+            {k === "all" ? "All Members" : k.replace("_", " ")}
+          </Button>
+        ))}
+      </div>
+
+      {/* Roster Table */}
+      <Card>
+        <CardContent className="p-0">
+          {loading ? (
+            <div className="p-4 space-y-2">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="py-12 text-center text-sm text-muted-foreground">
+              No memberships match the selected filter.
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Member</TableHead>
+                  <TableHead>Plan</TableHead>
+                  <TableHead>Expiry Date</TableHead>
+                  <TableHead>Price</TableHead>
+                  <TableHead>Payment</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((m) => {
+                  const expTime = new Date(m.expiryDate).getTime();
+                  const diffDays = Math.round((expTime - now) / 86400_000);
+                  const isExpiringSoon = diffDays > 0 && diffDays <= 7;
+                  const isExpired = diffDays <= 0;
+                  const isToggling = togglingId === m.id;
+
+                  return (
+                    <TableRow key={m.id}>
+                      <TableCell className="font-medium text-xs">
+                        {m.customer?.name ?? "Member"}
+                        <div className="text-[11px] text-muted-foreground font-mono">
+                          {m.customer?.phone || m.customer?.email}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs">{m.planName}</TableCell>
+                      <TableCell className="text-xs">
+                        {formatDate(m.expiryDate)}
+                        {isExpired ? (
+                          <Badge variant="destructive" className="ml-2 text-[10px]">
+                            Expired {Math.abs(diffDays)}d ago
+                          </Badge>
+                        ) : isExpiringSoon ? (
+                          <Badge className="ml-2 text-[10px] bg-amber-500/10 text-amber-600 border-amber-300">
+                            {diffDays}d left
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="ml-2 text-[10px] text-emerald-600">
+                            {diffDays}d left
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-xs font-mono font-medium">
+                        {formatINR(m.priceAmount)}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={m.paymentStatus === "PAID" ? "secondary" : "destructive"}
+                          className="text-[10px]"
+                        >
+                          {m.paymentStatus}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs px-2.5"
+                          disabled={isToggling}
+                          onClick={() => handleTogglePayment(m.id, m.paymentStatus)}
+                        >
+                          {isToggling ? "Updating..." : m.paymentStatus === "PAID" ? "Mark Overdue" : "Mark Paid"}
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

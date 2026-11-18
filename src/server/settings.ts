@@ -22,7 +22,26 @@ export type LoyaltyRules = {
   redemptionMinimum: number;
 };
 
+export type VerticalType = "GENERAL" | "COACHING" | "GYM" | "SALON";
+
+export type VerticalSettings = {
+  type: VerticalType;
+  coaching?: {
+    defaultBatch?: string;
+    parentReplyTimeoutMin?: number;
+  };
+  gym?: {
+    dailyDigestHour?: number;
+    googleSheetsSyncUrl?: string;
+  };
+  salon?: {
+    autoAssignStylist?: boolean;
+    ambientIotWebhookUrl?: string;
+  };
+};
+
 export type TenantSettings = {
+  vertical?: VerticalSettings;
   modules: {
     appointments: boolean;
     loyalty: boolean;
@@ -54,7 +73,20 @@ const BASE_REGISTRATION: RegistrationField[] = [
 
 const CATEGORY_PRESETS: Record<string, Partial<TenantSettings>> = {
   salon_spa: {
+    vertical: { type: "SALON", salon: { autoAssignStylist: true } },
     registrationFields: BASE_REGISTRATION.map((f) => (f.key === "concern" ? { ...f, label: "Which service are you most interested in?", active: true } : f)),
+  },
+  salon: {
+    vertical: { type: "SALON", salon: { autoAssignStylist: true } },
+    registrationFields: BASE_REGISTRATION.map((f) => (f.key === "concern" ? { ...f, label: "Preferred Stylist or Cut Style", active: true } : f)),
+  },
+  coaching: {
+    vertical: { type: "COACHING", coaching: { parentReplyTimeoutMin: 60 } },
+    registrationFields: BASE_REGISTRATION.map((f) => (f.key === "concern" ? { ...f, label: "Student Grade / Target Exam", active: true } : f)),
+  },
+  gym: {
+    vertical: { type: "GYM", gym: { dailyDigestHour: 21 } },
+    registrationFields: BASE_REGISTRATION.map((f) => (f.key === "concern" ? { ...f, label: "Fitness Goal (Strength, Weight Loss, Cardio)", active: true } : f)),
   },
   dental: {
     registrationFields: BASE_REGISTRATION.map((f) => (f.key === "concern" ? { ...f, label: "When was your last check-up?", active: true } : f)),

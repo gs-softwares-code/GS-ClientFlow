@@ -12,6 +12,7 @@ export async function POST(req: NextRequest) {
     }
     const body = (await request.json().catch(() => ({}))) as {
       email?: string; name?: string; phone?: string; serviceId?: string; staffId?: string;
+      assignedStaffId?: string; preferences?: Record<string, unknown>;
       startAt?: string; note?: string; turnstileToken?: string;
     };
     if (!body.email || !body.startAt || !body.serviceId) {
@@ -39,6 +40,8 @@ export async function POST(req: NextRequest) {
         customerId: customer.id,
         serviceId: body.serviceId,
         staffId: body.staffId ?? null,
+        assignedStaffId: body.assignedStaffId ?? null,
+        preferences: body.preferences,
         startAt: body.startAt,
         note: body.note ?? null,
       });
