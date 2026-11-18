@@ -279,7 +279,7 @@ model Appointment {
   preferences    String    @default("{}") // JSON: {haircutStyle, musicGenre, ambientLighting, beverage, notes}
   checkInStatus  String @map("check_in_status")    @default("SCHEDULED") // SCHEDULED | REMINDED_24H | CHECKED_IN | IN_SERVICE | COMPLETED | RESCHEDULED | NO_SHOW
   checkedInAt    DateTime? @map("checked_in_at")
-  reminder24hSentAt DateTime? @map("reminder24h_sent_at")
+  reminder24hSentAt DateTime? @map("reminder_24h_sent_at")
   reminderSentAt DateTime? @map("reminder_sent_at")
   followUpAt     DateTime? @map("follow_up_at")
   createdAt      DateTime @map("created_at")  @default(now())
