@@ -4,6 +4,7 @@ import { toJson, parseJson } from "@/server/lib/json";
 import { uuid } from "@/server/lib/ids";
 import { audit } from "@/server/tenancy/guard";
 import type { SessionCtx } from "@/server/tenancy/session";
+import DOMPurify from "isomorphic-dompurify";
 
 /** White-label service: branding, domains, registration form, widget, email config. */
 
@@ -17,12 +18,15 @@ export async function updateBranding(
     plan?: string;
   }
 ) {
+  const sanitizedName = patch.name ? DOMPurify.sanitize(patch.name.trim(), { ALLOWED_TAGS: [] }) : undefined;
+  const sanitizedLogo = patch.logoText ? DOMPurify.sanitize(patch.logoText.trim(), { ALLOWED_TAGS: [] }).slice(0, 3).toUpperCase() : undefined;
+
   const tenant = await db.tenant.update({
     where: { id: ctx.tenant.id },
     data: {
-      ...(patch.name ? { name: patch.name.trim() } : {}),
+      ...(sanitizedName ? { name: sanitizedName } : {}),
       ...(patch.brandColor && /^#[0-9a-fA-F]{6}$/.test(patch.brandColor) ? { brandColor: patch.brandColor } : {}),
-      ...(patch.logoText ? { logoText: patch.logoText.trim().slice(0, 3).toUpperCase() } : {}),
+      ...(sanitizedLogo ? { logoText: sanitizedLogo } : {}),
       ...(patch.businessCategory ? { businessCategory: patch.businessCategory } : {}),
       ...(patch.plan ? { plan: patch.plan } : {}),
     },

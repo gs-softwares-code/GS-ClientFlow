@@ -131,7 +131,8 @@ bun run db:push
 log_step_end "bun run db:push"
 
 log_step_start "Starting Next.js dev server"
-echo "[BUN] Starting development server..."
+echo "[BUN] Starting development server (bound to 127.0.0.1)..."
+export HOSTNAME="127.0.0.1"
 bun run dev &
 DEV_PID=$!
 log_step_end "Starting Next.js dev server"

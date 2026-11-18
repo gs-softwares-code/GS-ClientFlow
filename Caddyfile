@@ -1,19 +1,43 @@
 :81 {
-	@transform_port_query {
-		query XTransformPort=*
+	# Global Perimeter Security Headers
+	header {
+		# Strip untrusted incoming spoofed headers
+		-X-Forwarded-For
+		-X-Real-IP
+
+		# Strict Transport Security & Content Guard
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-XSS-Protection "1; mode=block"
 	}
 
-	handle @transform_port_query {
-		reverse_proxy localhost:{query.XTransformPort} {
-			header_up Host {host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-			header_up X-Real-IP {remote_host}
-		}
+	# Content-Security-Policy: Allow frame-ancestors ONLY on embeddable widget & client portal routes
+	@embed_routes {
+		path /api/tenant/widget* /portal*
+	}
+	header @embed_routes {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors *;"
 	}
 
+	@non_embed_routes {
+		not path /api/tenant/widget* /portal*
+	}
+	header @non_embed_routes {
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'self';"
+		X-Frame-Options "SAMEORIGIN"
+	}
+
+	# Restrict /api/ops/* endpoints at perimeter (allowlist localhost / trusted loopback)
+	@ops_restricted {
+		path /api/ops/*
+		not remote_ip 127.0.0.1 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+	}
+	respond @ops_restricted "Forbidden: Operational maintenance endpoints restricted to internal admin networks" 403
+
+	# Reverse proxy strictly to local loopback (127.0.0.1)
 	handle {
-		reverse_proxy localhost:3000 {
+		reverse_proxy 127.0.0.1:3000 {
 			header_up Host {host}
 			header_up X-Forwarded-For {remote_host}
 			header_up X-Forwarded-Proto {scheme}

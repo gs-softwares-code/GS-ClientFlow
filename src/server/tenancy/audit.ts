@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { toJson } from "@/server/lib/json";
-import type { SessionCtx, PublicCtx } from "@/server/tenancy/session";
+import type { SessionCtx } from "@/server/tenancy/session";
+import type { PublicCtx } from "@/server/tenancy/guard";
 
 /**
  * Enterprise Audit Trail Engine

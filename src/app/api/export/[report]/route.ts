@@ -4,10 +4,15 @@ import { withRoute, jsonError } from "@/server/tenancy/guard";
 import { customerIntelligence, feedbackTrends, appointmentPerformance, loyaltyStats, overview } from "@/server/services/analytics";
 import { campaignStats } from "@/server/services/campaigns";
 
-/** CSV export — every report is computed from live tenant data. */
+/** CSV export — every report is computed from live tenant data with CSV Injection protection. */
 function csvEscape(value: unknown): string {
-  const s = value === null || value === undefined ? "" : String(value);
-  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  let s = value === null || value === undefined ? "" : String(value);
+  // Neutralize CSV Formula Injection (CWE-1236)
+  // If a field begins with =, +, -, @, tab, or carriage return, prepend a single quote
+  if (/^[=+\-@\t\r]/.test(s)) {
+    s = `'${s}`;
+  }
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 function toCsv(rows: (string | number | null | undefined)[][]): string {
   return rows.map((r) => r.map(csvEscape).join(",")).join("\n");

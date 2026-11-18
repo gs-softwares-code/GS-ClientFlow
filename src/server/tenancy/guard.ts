@@ -4,20 +4,18 @@ import type { Tenant } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSessionCtx, type SessionCtx } from "@/server/tenancy/session";
 import { readSettings, type TenantSettings } from "@/server/settings";
-import { rateLimit, pruneBuckets } from "@/server/ratelimit";
+import { rateLimit, pruneBuckets, arcjetEvaluate } from "@/server/ratelimit";
 import { meterUsage } from "@/server/usage";
 import { logEvent } from "@/server/logs";
 import { toJson } from "@/server/lib/json";
 
 /**
- * Central API guard — every session route goes through here:
- *   1. authenticate the session (tenant is resolved server-side only)
- *   2. tenant-scoped rate limiting
- *   3. usage metering
- *   4. uniform error envelope + structured logs
- *
- * This is the app-level equivalent of a Postgres `SET LOCAL app.tenant_id`
- * + RLS policy: handlers never receive a tenant id from the client.
+ * Central API Security Guard — Every session and public route passes through here:
+ *   1. Perimeter WAF (Arcjet Shield / Bot Protection)
+ *   2. Session authentication (tenant context is resolved server-side only)
+ *   3. Transactional tenant-scoped rate limiting (no cross-tenant noisy-neighbor DoS)
+ *   4. Usage metering & audit trail logging
+ *   5. Uniform error envelope & structured logging
  */
 
 export type PublicCtx = { tenant: Tenant; settings: TenantSettings; ip: string };
@@ -26,7 +24,12 @@ export function jsonOk(data: unknown, init?: ResponseInit): NextResponse {
   return NextResponse.json(data as Record<string, unknown>, init);
 }
 
-export function jsonError(code: string, message: string, status: number, extra?: Record<string, unknown>): NextResponse {
+export function jsonError(
+  code: string,
+  message: string,
+  status: number,
+  extra?: Record<string, unknown>
+): NextResponse {
   return NextResponse.json({ error: { code, message, ...extra } }, { status });
 }
 
@@ -40,7 +43,7 @@ export class ApiError extends Error {
   }
 }
 
-type RouteParams = { params: Promise<Record<string, string>> } | undefined;
+export type RouteParams = { params: Promise<Record<string, string>> } | undefined;
 
 export function withRoute(
   handler: (ctx: SessionCtx, req: NextRequest, params: Record<string, string>) => Promise<NextResponse>,
@@ -50,20 +53,48 @@ export function withRoute(
     const url = new URL(req.url);
     const routeName = opts.name ?? url.pathname;
     let tenantIdForLog: string | undefined;
+
     try {
+      // 1. Layer 1: Perimeter WAF evaluation (Arcjet Shield)
+      const waf = await arcjetEvaluate(req);
+      if (!waf.allowed) {
+        return jsonError("waf_blocked", waf.reason || "Request blocked by perimeter security policy", 403);
+      }
+
+      // 2. Layer 2: Authenticate session
       const ctx = await getSessionCtx();
       if (!ctx) return jsonError("unauthorized", "Sign in required", 401);
 
       tenantIdForLog = ctx.tenant.id;
-      const rl = rateLimit(`t:${ctx.tenant.id}:${routeName}`, opts.limitPerMinute ?? 90, opts.limitPerMinute ? opts.limitPerMinute / 60 : 1.5);
+
+      // 3. Layer 3: Tenant-scoped rate limiting
+      const rl = rateLimit(
+        `t:${ctx.tenant.id}:${routeName}`,
+        opts.limitPerMinute ?? 90,
+        opts.limitPerMinute ? opts.limitPerMinute / 60 : 1.5
+      );
       if (!rl.ok) {
         await logEvent("warn", "ratelimit", `429 on ${routeName}`, { route: routeName }, ctx.tenant.id);
         return jsonError("rate_limited", "Too many requests — slow down", 429, { retryAfterMs: rl.retryAfterMs });
       }
+
       await meterUsage(ctx.tenant.id, "requests");
       if (Math.random() < 0.03) pruneBuckets();
 
-      const params = route?.params ? await route.params : {};
+      // Resilient parameter resolution
+      let params: Record<string, string> = {};
+      if (route?.params) {
+        params = await route.params;
+      } else {
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts.length >= 3 && parts[0] === "api") {
+          params = { id: parts[2] };
+          if (parts[1] === "export") {
+            params = { report: parts[2] };
+          }
+        }
+      }
+
       return await handler(ctx, req, params);
     } catch (err) {
       if (err instanceof ApiError) {
@@ -84,7 +115,14 @@ export function withPublicRoute(
   return async (req: NextRequest, route: RouteParams) => {
     const url = new URL(req.url);
     const routeName = opts.name ?? url.pathname;
+
     try {
+      // 1. Layer 1: Perimeter WAF evaluation
+      const waf = await arcjetEvaluate(req);
+      if (!waf.allowed) {
+        return jsonError("waf_blocked", waf.reason || "Request blocked by perimeter security policy", 403);
+      }
+
       const slug = url.searchParams.get("tenant") ?? req.headers.get("x-gscf-tenant") ?? "";
       if (!slug) return jsonError("bad_request", "Missing tenant slug (?tenant=)", 400);
 
@@ -93,13 +131,23 @@ export function withPublicRoute(
 
       const ip =
         req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "local";
+
       const rl = rateLimit(`ip:${ip}:${routeName}`, opts.limitPerMinute ?? 10, (opts.limitPerMinute ?? 10) / 60);
       if (!rl.ok) {
         await logEvent("warn", "ratelimit", `429 (public) on ${routeName}`, { ip }, tenant.id);
         return jsonError("rate_limited", "Too many requests — try again shortly", 429, { retryAfterMs: rl.retryAfterMs });
       }
 
-      const params = route?.params ? await route.params : {};
+      let params: Record<string, string> = {};
+      if (route?.params) {
+        params = await route.params;
+      } else {
+        const parts = url.pathname.split("/").filter(Boolean);
+        if (parts.length >= 3 && parts[0] === "api") {
+          params = { id: parts[2] };
+        }
+      }
+
       return await handler({ tenant, settings: readSettings(tenant), ip }, req, params);
     } catch (err) {
       if (err instanceof ApiError) {

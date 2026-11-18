@@ -1,12 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { backupSnapshot } from "@/server/services/whitelabel";
-import { withRoute, audit } from "@/server/tenancy/guard";
+import { withRoute, jsonError } from "@/server/tenancy/guard";
+import { logAuditEvent } from "@/server/tenancy/audit";
+import { requirePermission, Permissions } from "@/server/tenancy/rbac";
 
-/** Backup export — a full, restorable JSON snapshot of the tenant's data. */
+/**
+ * Enterprise Backup Export Endpoint
+ * Full, restorable JSON snapshot of the tenant's data.
+ * Guarded by RBAC permissions (owner / admin / auditor).
+ */
 export async function GET(req: NextRequest) {
-  return withRoute(async (ctx) => {
+  return withRoute(async (ctx, request) => {
+    // RBAC: Verify trigger backup permission
+    if (!ctx.user.isPlatformAdmin && ctx.user.role !== "owner" && ctx.user.role !== "admin") {
+      await logAuditEvent(ctx, {
+        action: "ops.backup_denied",
+        entity: "tenant",
+        metadata: { role: ctx.user.role },
+      }, request);
+      return jsonError("forbidden", "Insufficient permissions to generate system backup", 403);
+    }
+
     const snapshot = await backupSnapshot(ctx.tenant.id);
-    await audit(ctx, "ops.backup_exported", "tenant", ctx.tenant.id, { counts: snapshot.counts });
+    await logAuditEvent(ctx, {
+      action: "ops.backup_exported",
+      entity: "tenant",
+      entityId: ctx.tenant.id,
+      metadata: { counts: snapshot.counts },
+    }, request);
+
     return new NextResponse(JSON.stringify(snapshot, null, 2), {
       headers: {
         "content-type": "application/json",

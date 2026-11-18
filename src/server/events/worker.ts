@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, withTenantContext } from "@/lib/db";
 import { handlers } from "@/server/events/handlers";
 import { workerStats } from "@/server/ops-state";
 import { logEvent } from "@/server/logs";
@@ -6,6 +6,7 @@ import { executeCampaign } from "@/server/services/campaigns";
 import { executeWorkflowForCustomer } from "@/server/services/workflow-engine";
 import { sendChannelMessage } from "@/server/channels/adapter";
 import { parseJson } from "@/server/lib/json";
+import { verifyEventPayload } from "@/server/events/outbox";
 
 /**
  * Outbox worker — the sandbox equivalent of the Cloudflare Queues consumer.
@@ -61,6 +62,49 @@ export async function tick(): Promise<TickSummary> {
 
     for (const event of due) {
       try {
+        // Cryptographic HMAC integrity verification
+        let parsedPayload: Record<string, unknown> | null = null;
+        try {
+          parsedPayload = JSON.parse(event.payload);
+        } catch {
+          // Non-JSON or legacy payload
+        }
+
+        if (parsedPayload && typeof parsedPayload._meta === "object" && parsedPayload._meta !== null) {
+          const meta = parsedPayload._meta as { correlationId?: string; signature?: string };
+          if (meta.signature && meta.correlationId) {
+            const { _meta, ...bizData } = parsedPayload;
+            const rawBizStr = JSON.stringify(bizData);
+            const isValid = verifyEventPayload(
+              event.tenantId,
+              event.type,
+              rawBizStr,
+              meta.correlationId,
+              meta.signature
+            );
+            if (!isValid) {
+              await db.outboxEvent.update({
+                where: { id: event.id },
+                data: {
+                  status: "dead",
+                  processedAt: new Date(),
+                  lastError: "Security Violation: Cryptographic signature mismatch (tampered event)",
+                },
+              });
+              summary.dead += 1;
+              stats.dead += 1;
+              await logEvent(
+                "error",
+                "worker",
+                `HMAC signature failure for outbox event ${event.id} (tenant ${event.tenantId})`,
+                { eventId: event.id, tenantId: event.tenantId },
+                event.tenantId
+              );
+              continue;
+            }
+          }
+        }
+
         // idempotent consumption via dedupe key
         if (event.dedupeKey) {
           const twin = await db.outboxEvent.findFirst({
@@ -86,7 +130,10 @@ export async function tick(): Promise<TickSummary> {
           continue;
         }
 
-        await handler(event);
+        await withTenantContext(event.tenantId, async () => {
+          await handler(event);
+        });
+
         await db.outboxEvent.update({ where: { id: event.id }, data: { status: "done", processedAt: new Date(), lastError: null } });
         summary.processed += 1;
         stats.processed += 1;
@@ -127,7 +174,9 @@ export async function tick(): Promise<TickSummary> {
           where: { id: action.id },
           data: { attempts: { increment: 1 } },
         });
-        await processScheduledAction(action.id, action.tenantId, action.kind, parseJson<Record<string, string>>(action.payload, {}));
+        await withTenantContext(action.tenantId, async () => {
+          await processScheduledAction(action.id, action.tenantId, action.kind, parseJson<Record<string, string>>(action.payload, {}));
+        });
         await db.scheduledAction.update({ where: { id: action.id }, data: { status: "done", processedAt: new Date() } });
         summary.scheduledProcessed += 1;
       } catch (err) {

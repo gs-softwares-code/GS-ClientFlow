@@ -116,8 +116,8 @@ io.on('connection', (socket) => {
 })
 
 const PORT = 3003
-httpServer.listen(PORT, () => {
-  console.log(`WebSocket server running on port ${PORT}`)
+httpServer.listen(PORT, '127.0.0.1', () => {
+  console.log(`WebSocket server running on 127.0.0.1:${PORT}`)
 })
 
 // Graceful shutdown

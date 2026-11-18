@@ -1,15 +1,19 @@
 import { db } from "@/lib/db";
 import { publish } from "@/server/events/outbox";
 import { EventTypes } from "@/server/events/contracts";
+import DOMPurify from "isomorphic-dompurify";
 
 export async function submitFeedback(
   tenantId: string,
   input: { customerId: string; rating: number; comment?: string | null }
 ) {
   const rating = Math.min(5, Math.max(1, Math.round(input.rating)));
+  const sanitizedComment = input.comment
+    ? DOMPurify.sanitize(input.comment.trim(), { ALLOWED_TAGS: [] })
+    : null;
   const feedback = await db.$transaction(async (tx) => {
     const created = await tx.feedback.create({
-      data: { tenantId, customerId: input.customerId, rating, comment: input.comment?.trim() || null },
+      data: { tenantId, customerId: input.customerId, rating, comment: sanitizedComment },
     });
     await publish(tx, {
       tenantId,
