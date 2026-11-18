@@ -116,7 +116,7 @@ export async function POST(req: NextRequest) {
       return jsonError("rate_limited", (err as Error).message, 429);
     }
     console.error("[Business Registration Error]:", err);
-    return jsonError("internal", "Failed to register new business", 500);
+    return jsonError("internal", (err as Error).message || "Failed to register new business", 500);
   }
 }
 

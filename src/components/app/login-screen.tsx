@@ -279,7 +279,7 @@ export function LoginScreen({
                     <Label htmlFor="ownerName">Owner Name</Label>
                     <Input
                       id="ownerName"
-                      placeholder="Jane Doe"
+                      placeholder="Elon Musk"
                       value={newBizOwnerName}
                       onChange={(e) => setNewBizOwnerName(e.target.value)}
                     />
@@ -304,7 +304,7 @@ export function LoginScreen({
                   <Input
                     id="ownerEmail"
                     type="email"
-                    placeholder="jane@apexpt.com"
+                    placeholder="elonmusk.ai@gmail.com"
                     value={newBizOwnerEmail}
                     onChange={(e) => setNewBizOwnerEmail(e.target.value)}
                   />

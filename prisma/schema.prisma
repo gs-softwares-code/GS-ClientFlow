@@ -11,7 +11,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -21,19 +21,19 @@ model Tenant {
   id                String    @id @default(uuid())
   slug              String    @unique // subdomain: <slug>.gsclientflow.app
   name              String
-  businessCategory  String    @default("services") // salon_spa | dental | clinic | retail | services | food
-  verticalType      String    @default("GENERAL") // GENERAL | COACHING | GYM | SALON
-  customDomain      String?   @unique
-  domainVerifiedAt  DateTime?
-  domainVerifyToken String?
-  brandColor        String    @default("#0f766e")
-  logoText          String    @default("GC") // 2-letter monogram (white-label)
+  businessCategory  String @map("business_category")    @default("services") // salon_spa | dental | clinic | retail | services | food
+  verticalType      String @map("vertical_type")    @default("GENERAL") // GENERAL | COACHING | GYM | SALON
+  customDomain      String? @map("custom_domain")   @unique
+  domainVerifiedAt  DateTime? @map("domain_verified_at")
+  domainVerifyToken String? @map("domain_verify_token")
+  brandColor        String @map("brand_color")    @default("#0f766e")
+  logoText          String @map("logo_text")    @default("GC") // 2-letter monogram (white-label)
   plan              String    @default("starter") // starter | growth | pro
   status            String    @default("active")
   timezone          String    @default("Asia/Calcutta")
   settings          String    @default("{}") // JSON: modules, channels, registration fields, loyalty rules, retention policy, email sender
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime @map("created_at")  @default(now())
+  updatedAt         DateTime @map("updated_at")  @updatedAt
 
   users             User[]
   sessions          Session[]
@@ -64,17 +64,18 @@ model Tenant {
   memberships       Membership[]
 
   @@index([status])
+  @@map("tenants")
 }
 
 model User {
   id              String   @id @default(uuid())
-  tenantId        String
+  tenantId        String @map("tenant_id")
   email           String
   name            String
   role            String   @default("staff") // owner | admin | staff
-  isPlatformAdmin Boolean  @default(false) // demo: cross-tenant isolation tester
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  isPlatformAdmin Boolean @map("is_platform_admin")  @default(false) // demo: cross-tenant isolation tester
+  createdAt       DateTime @map("created_at") @default(now())
+  updatedAt       DateTime @map("updated_at") @updatedAt
 
   tenant          Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   sessions        Session[]
@@ -82,46 +83,48 @@ model User {
 
   @@unique([tenantId, email])
   @@index([email])
+  @@map("users")
 }
 
 model Session {
   id        String   @id @default(uuid())
-  userId    String
-  tenantId  String
-  createdAt DateTime @default(now())
-  expiresAt DateTime
+  userId    String @map("user_id")
+  tenantId  String @map("tenant_id")
+  createdAt DateTime @map("created_at") @default(now())
+  expiresAt DateTime @map("expires_at")
 
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([expiresAt])
+  @@map("sessions")
 }
 
 // ---------------------------------------------------------------- customers
 
 model Customer {
   id                String    @id @default(uuid())
-  tenantId          String
-  publicId          String // short stable cursor key
+  tenantId          String @map("tenant_id")
+  publicId          String @map("public_id") // short stable cursor key
   name              String
   email             String // stored lowercased
   phone             String?
-  birthdayYear      Int?
-  birthdayMonth     Int?
-  birthdayDay        Int?
+  birthdayYear      Int? @map("birthday_year")
+  birthdayMonth     Int? @map("birthday_month")
+  birthdayDay        Int? @map("birthday_day")
   source            String    @default("walk_in") // walk_in | referral | instagram | google | website | campaign | existing_customer
-  referredByCode    String? // referral attribution at registration
+  referredByCode    String? @map("referred_by_code") // referral attribution at registration
   status            String    @default("active") // active | archived
   consents          String    @default("{}") // JSON: {marketing, email, sms, whatsapp}
   preferences        String    @default("{}") // JSON: {preferredChannel, quiet: bool}
   notes             String?
-  firstVisitAt      DateTime?
-  lastVisitAt       DateTime?
-  visitCount        Int       @default(0)
-  totalSpendCents   Int       @default(0)
-  pointsBalance     Int       @default(0)
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  firstVisitAt      DateTime? @map("first_visit_at")
+  lastVisitAt       DateTime? @map("last_visit_at")
+  visitCount        Int @map("visit_count")       @default(0)
+  totalSpendCents   Int @map("total_spend_cents")       @default(0)
+  pointsBalance     Int @map("points_balance")       @default(0)
+  createdAt         DateTime @map("created_at")  @default(now())
+  updatedAt         DateTime @map("updated_at")  @updatedAt
 
   tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   tags          CustomerTag[]
@@ -145,39 +148,42 @@ model Customer {
   @@index([tenantId, lastVisitAt]) // inactive-customer detection
   @@index([tenantId, source]) // source attribution
   @@index([tenantId, pointsBalance])
+  @@map("customers")
 }
 
 model Tag {
   id        String   @id @default(uuid())
-  tenantId  String
+  tenantId  String @map("tenant_id")
   name      String
   color    String   @default("#0f766e")
-  createdAt DateTime @default(now())
+  createdAt DateTime @map("created_at") @default(now())
 
   tenant    Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customers CustomerTag[]
 
   @@unique([tenantId, name])
+  @@map("tags")
 }
 
 model CustomerTag {
-  customerId String
-  tagId      String
+  customerId String @map("customer_id")
+  tagId      String @map("tag_id")
 
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
   tag      Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
 
   @@id([customerId, tagId])
   @@index([tagId])
+  @@map("customer_tags")
 }
 
 model Visit {
   id         String   @id @default(uuid())
-  tenantId   String
-  customerId String
-  occurredAt DateTime @default(now())
-  amountCents Int     @default(0)
-  staffId    String?
+  tenantId   String @map("tenant_id")
+  customerId String @map("customer_id")
+  occurredAt DateTime @map("occurred_at") @default(now())
+  amountCents Int @map("amount_cents")     @default(0)
+  staffId    String? @map("staff_id")
   note       String?
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -185,18 +191,19 @@ model Visit {
 
   @@index([tenantId, occurredAt]) // visit history / analytics
   @@index([customerId, occurredAt])
+  @@map("visits")
 }
 
 model Feedback {
   id             String   @id @default(uuid())
-  tenantId       String
-  customerId     String
+  tenantId       String @map("tenant_id")
+  customerId     String @map("customer_id")
   rating         Int // 1..5
   comment        String?
   status         String   @default("new") // new | reviewed | actioned
-  followUpStatus String   @default("none") // none | pending | done
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  followUpStatus String @map("follow_up_status")   @default("none") // none | pending | done
+  createdAt      DateTime @map("created_at") @default(now())
+  updatedAt      DateTime @map("updated_at") @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -204,75 +211,79 @@ model Feedback {
   @@index([tenantId, createdAt])
   @@index([tenantId, rating])
   @@index([customerId])
+  @@map("feedback")
 }
 
 model Segment {
   id          String   @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   name        String
   description String?
   rules       String   @default("[]") // JSON: [{attr, op, value}] evaluated by engine
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @map("created_at") @default(now())
+  updatedAt   DateTime @map("updated_at") @updatedAt
 
   tenant    Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   // membership is transient — computed by the segmentation engine, not stored
 
   @@index([tenantId])
+  @@map("segments")
 }
 
 // ---------------------------------------------------------------- appointments
 
 model Service {
   id          String   @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   name        String
-  durationMin Int      @default(30)
-  priceCents  Int      @default(0)
+  durationMin Int @map("duration_min")      @default(30)
+  priceCents  Int @map("price_cents")      @default(0)
   active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @map("created_at") @default(now())
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments Appointment[]
 
   @@unique([tenantId, name])
   @@index([tenantId, active])
+  @@map("services")
 }
 
 model Staff {
   id          String   @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   name        String
   role        String   @default("staff") // owner | manager | staff
   active      Boolean  @default(true)
   availability String  @default("{}") // JSON: {mon: [startMin, endMin], ...}
-  createdAt   DateTime @default(now())
+  createdAt   DateTime @map("created_at") @default(now())
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments Appointment[]
 
   @@index([tenantId, active])
+  @@map("staff")
 }
 
 model Appointment {
   id             String    @id @default(uuid())
-  tenantId       String
-  customerId     String
-  serviceId      String?
-  staffId        String?
-  assignedStaffId String?
-  startAt        DateTime
-  durationMin    Int       @default(30)
+  tenantId       String @map("tenant_id")
+  customerId     String @map("customer_id")
+  serviceId      String? @map("service_id")
+  staffId        String? @map("staff_id")
+  assignedStaffId String? @map("assigned_staff_id")
+  startAt        DateTime @map("start_at")
+  durationMin    Int @map("duration_min")       @default(30)
   status         String    @default("scheduled") // scheduled | confirmed | completed | cancelled | no_show
   note           String?
   preferences    String    @default("{}") // JSON: {haircutStyle, musicGenre, ambientLighting, beverage, notes}
-  checkInStatus  String    @default("SCHEDULED") // SCHEDULED | REMINDED_24H | CHECKED_IN | IN_SERVICE | COMPLETED | RESCHEDULED | NO_SHOW
-  checkedInAt    DateTime?
-  reminder24hSentAt DateTime?
-  reminderSentAt DateTime?
-  followUpAt     DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  checkInStatus  String @map("check_in_status")    @default("SCHEDULED") // SCHEDULED | REMINDED_24H | CHECKED_IN | IN_SERVICE | COMPLETED | RESCHEDULED | NO_SHOW
+  checkedInAt    DateTime? @map("checked_in_at")
+  reminder24hSentAt DateTime? @map("reminder24h_sent_at")
+  reminderSentAt DateTime? @map("reminder_sent_at")
+  followUpAt     DateTime? @map("follow_up_at")
+  createdAt      DateTime @map("created_at")  @default(now())
+  updatedAt      DateTime @map("updated_at")  @updatedAt
 
   tenant        Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer      Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -283,24 +294,25 @@ model Appointment {
   @@index([tenantId, startAt]) // booking calendar + reminders
   @@index([tenantId, status, startAt])
   @@index([customerId, startAt])
+  @@map("appointments")
 }
 
 // ---------------------------------------------------------------- offers / loyalty
 
 model Offer {
   id          String    @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   title       String
   description String?
   kind        String    @default("discount") // discount | birthday_greeting | points_bonus | custom
   value       Int       @default(0) // percent / rupees / points depending on kind
   channel     String    @default("email") // email | sms | whatsapp
-  segmentId   String?
+  segmentId   String? @map("segment_id")
   status      String    @default("active") // active | paused | expired
-  startsAt    DateTime  @default(now())
-  expiresAt   DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  startsAt    DateTime @map("starts_at")  @default(now())
+  expiresAt   DateTime? @map("expires_at")
+  createdAt   DateTime @map("created_at")  @default(now())
+  updatedAt   DateTime @map("updated_at")  @updatedAt
 
   tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   coupons    Coupon[]
@@ -308,19 +320,20 @@ model Offer {
 
   @@index([tenantId, status]) // campaign execution audience
   @@index([tenantId, expiresAt]) // expiry reminder scans
+  @@map("offers")
 }
 
 model Coupon {
   id         String    @id @default(uuid())
-  tenantId   String
-  offerId    String?
-  customerId String?
+  tenantId   String @map("tenant_id")
+  offerId    String? @map("offer_id")
+  customerId String? @map("customer_id")
   code       String
   status     String    @default("active") // active | redeemed | expired
-  pointsCost Int?
-  expiresAt  DateTime?
-  redeemedAt DateTime?
-  createdAt  DateTime  @default(now())
+  pointsCost Int? @map("points_cost")
+  expiresAt  DateTime? @map("expires_at")
+  redeemedAt DateTime? @map("redeemed_at")
+  createdAt  DateTime @map("created_at")  @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   offer    Offer?   @relation(fields: [offerId], references: [id], onDelete: SetNull)
@@ -328,16 +341,17 @@ model Coupon {
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
+  @@map("coupons")
 }
 
 model OfferRedemption {
   id             String   @id @default(uuid())
-  tenantId       String
-  offerId        String
-  customerId     String
-  couponId       String?
-  idempotencyKey String   @unique // prevents duplicate redemptions / reward credits
-  createdAt      DateTime @default(now())
+  tenantId       String @map("tenant_id")
+  offerId        String @map("offer_id")
+  customerId     String @map("customer_id")
+  couponId       String? @map("coupon_id")
+  idempotencyKey String @map("idempotency_key")   @unique // prevents duplicate redemptions / reward credits
+  createdAt      DateTime @map("created_at") @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   offer    Offer    @relation(fields: [offerId], references: [id], onDelete: Cascade)
@@ -345,79 +359,83 @@ model OfferRedemption {
 
   @@unique([offerId, customerId])
   @@index([tenantId, createdAt])
+  @@map("offer_redemptions")
 }
 
 model RewardTransaction {
   id             String   @id @default(uuid())
-  tenantId       String
-  customerId     String
+  tenantId       String @map("tenant_id")
+  customerId     String @map("customer_id")
   kind           String // earn_visit | earn_feedback | earn_referral | earn_offer | redeem | adjust | expire | bonus
   points         Int
   reason        String
-  balanceAfter   Int
-  idempotencyKey String   @unique // transactional duplicate guard
-  createdAt      DateTime @default(now())
+  balanceAfter   Int @map("balance_after")
+  idempotencyKey String @map("idempotency_key")   @unique // transactional duplicate guard
+  createdAt      DateTime @map("created_at") @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, customerId, createdAt]) // reward history
+  @@map("reward_transactions")
 }
 
 model ReferralCode {
   id         String   @id @default(uuid())
-  tenantId   String
-  customerId String
+  tenantId   String @map("tenant_id")
+  customerId String @map("customer_id")
   code       String
-  usesCount  Int      @default(0)
-  createdAt  DateTime @default(now())
+  usesCount  Int @map("uses_count")      @default(0)
+  createdAt  DateTime @map("created_at") @default(now())
 
   tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, code])
   @@index([tenantId, customerId])
+  @@map("referral_codes")
 }
 
 // ---------------------------------------------------------------- campaigns / messaging
 
 model Campaign {
   id          String    @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   name        String
   channel     String    @default("email") // email | sms | whatsapp
   template    String
-  segmentId   String?
+  segmentId   String? @map("segment_id")
   filter      String    @default("{}") // JSON ad-hoc audience filter
   status      String    @default("draft") // draft | scheduled | running | completed | cancelled
-  scheduledAt DateTime?
-  completedAt DateTime?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  scheduledAt DateTime? @map("scheduled_at")
+  completedAt DateTime? @map("completed_at")
+  createdAt   DateTime @map("created_at")  @default(now())
+  updatedAt   DateTime @map("updated_at")  @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages Message[]
 
   @@index([tenantId, status, scheduledAt]) // due-campaign scan
+  @@map("campaigns")
 }
 
 model Message {
   id             String    @id @default(uuid())
-  tenantId       String
-  campaignId     String?
-  customerId     String
+  tenantId       String @map("tenant_id")
+  campaignId     String? @map("campaign_id")
+  customerId     String @map("customer_id")
   channel        String
   kind           String    @default("campaign") // campaign | workflow | transactional
   subject        String?
   body           String
   status         String    @default("queued") // queued | sent | delivered | read | failed | skipped
   attempts       Int       @default(0)
-  lastError      String?
-  idempotencyKey String?   @unique
-  sentAt         DateTime?
-  deliveredAt    DateTime?
-  readAt         DateTime?
-  createdAt      DateTime  @default(now())
+  lastError      String? @map("last_error")
+  idempotencyKey String? @map("idempotency_key")   @unique
+  sentAt         DateTime? @map("sent_at")
+  deliveredAt    DateTime? @map("delivered_at")
+  readAt         DateTime? @map("read_at")
+  createdAt      DateTime @map("created_at")  @default(now())
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
@@ -426,45 +444,47 @@ model Message {
   @@index([tenantId, customerId, createdAt]) // per-customer message log
   @@index([campaignId, status])
   @@index([tenantId, status, createdAt])
+  @@map("messages")
 }
 
 // ---------------------------------------------------------------- automation
 
 model Workflow {
   id             String    @id @default(uuid())
-  tenantId       String
+  tenantId       String @map("tenant_id")
   name           String
   category       String    @default("custom") // birthday | onboarding | inactive | appointment_reminder | feedback_followup | offer_expiry | custom
-  triggerType    String    @default("event") // event | date | manual
-  triggerEvent   String?   // e.g. customer.registered, feedback.submitted
-  dateKind       String?   // birthday | inactive | offer_expiry | appointment_reminder
-  offsetMinutes  Int?      // delay before/after trigger (time delay support)
-  conditionRules String    @default("[]") // JSON attribute conditions
-  segmentId      String?
+  triggerType    String @map("trigger_type")    @default("event") // event | date | manual
+  triggerEvent   String? @map("trigger_event")   // e.g. customer.registered, feedback.submitted
+  dateKind       String? @map("date_kind")   // birthday | inactive | offer_expiry | appointment_reminder
+  offsetMinutes  Int? @map("offset_minutes")      // delay before/after trigger (time delay support)
+  conditionRules String @map("condition_rules")    @default("[]") // JSON attribute conditions
+  segmentId      String? @map("segment_id")
   channel        String    @default("email")
   template       String
-  requireConsent Boolean   @default(true)
+  requireConsent Boolean @map("require_consent")   @default(true)
   active         Boolean   @default(true)
-  lastRunAt      DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  lastRunAt      DateTime? @map("last_run_at")
+  createdAt      DateTime @map("created_at")  @default(now())
+  updatedAt      DateTime @map("updated_at")  @updatedAt
 
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   runs   WorkflowRun[]
 
   @@index([tenantId, active, triggerType]) // event dispatch / date scans
   @@index([tenantId, category])
+  @@map("workflows")
 }
 
 model WorkflowRun {
   id          String   @id @default(uuid())
-  tenantId    String
-  workflowId  String
-  customerId  String?
-  triggerInfo String    @default("{}") // JSON: what fired, dedupe key, source
+  tenantId    String @map("tenant_id")
+  workflowId  String @map("workflow_id")
+  customerId  String? @map("customer_id")
+  triggerInfo String @map("trigger_info")    @default("{}") // JSON: what fired, dedupe key, source
   status      String    @default("completed") // scheduled | completed | skipped | failed
   steps       String    @default("[]") // JSON execution log: [{step, detail, ok}]
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @map("created_at")  @default(now())
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
@@ -472,61 +492,65 @@ model WorkflowRun {
 
   @@index([workflowId, createdAt]) // campaign execution logs / workflow logs
   @@index([tenantId, createdAt])
+  @@map("workflow_runs")
 }
 
 // ---------------------------------------------------------------- outbox / scheduling / ops
 
 model OutboxEvent {
   id           String    @id @default(uuid())
-  tenantId     String
+  tenantId     String @map("tenant_id")
   type         String // see src/server/events/contracts.ts
   payload      String    @default("{}") // JSON
-  dedupeKey    String?   @unique // idempotency
+  dedupeKey    String? @map("dedupe_key")   @unique // idempotency
   status       String    @default("pending") // pending | processing | done | dead
   attempts     Int       @default(0)
-  maxAttempts Int       @default(5)
-  availableAt  DateTime  @default(now()) // next attempt / backoff
-  lastError   String?
-  processedAt  DateTime?
-  createdAt    DateTime  @default(now())
+  maxAttempts Int @map("max_attempts")       @default(5)
+  availableAt  DateTime @map("available_at")  @default(now()) // next attempt / backoff
+  lastError   String? @map("last_error")
+  processedAt  DateTime? @map("processed_at")
+  createdAt    DateTime @map("created_at")  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([status, availableAt]) // worker claim scan
   @@index([tenantId, status, createdAt])
+  @@map("outbox_events")
 }
 
 model ScheduledAction {
   id        String    @id @default(uuid())
-  tenantId  String
+  tenantId  String @map("tenant_id")
   kind      String // workflow_step | appointment_reminder | offer_expiry_reminder | post_appointment_followup | inactive_reengagement
   payload   String    @default("{}")
-  dueAt     DateTime
+  dueAt     DateTime @map("due_at")
   status    String    @default("pending") // pending | done | failed | cancelled
   attempts  Int       @default(0)
-  processedAt DateTime?
-  createdAt DateTime  @default(now())
+  processedAt DateTime? @map("processed_at")
+  createdAt DateTime @map("created_at")  @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([status, dueAt])
   @@index([tenantId, status])
+  @@map("scheduled_actions")
 }
 
 model AuditLog {
   id         String   @id @default(uuid())
-  tenantId   String
-  actorId    String?
-  actorLabel String
+  tenantId   String @map("tenant_id")
+  actorId    String? @map("actor_id")
+  actorLabel String @map("actor_label")
   action     String
   entity     String
-  entityId   String?
+  entityId   String? @map("entity_id")
   meta       String   @default("{}")
-  createdAt  DateTime @default(now())
+  createdAt  DateTime @map("created_at") @default(now())
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, createdAt])
+  @@map("audit_logs")
 }
 
 model SystemLog {
@@ -535,15 +559,16 @@ model SystemLog {
   scope     String
   message   String
   meta      String   @default("{}")
-  tenantId  String?
-  createdAt DateTime @default(now())
+  tenantId  String? @map("tenant_id")
+  createdAt DateTime @map("created_at") @default(now())
 
   @@index([createdAt])
+  @@map("system_logs")
 }
 
 model UsageCounter {
   id       String   @id @default(uuid())
-  tenantId String
+  tenantId String @map("tenant_id")
   metric   String // requests | messages | registrations | storage_rows
   day      String // yyyy-mm-dd
   count    Int      @default(0)
@@ -551,42 +576,44 @@ model UsageCounter {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, metric, day])
+  @@map("usage_counters")
 }
 
 // ---------------------------------------------------------------- vertical automations
 
 model StaffMember {
   id          String   @id @default(uuid())
-  tenantId    String
+  tenantId    String @map("tenant_id")
   name        String
   role        String   @default("staff")
   phone       String?
   specialties String   @default("[]") // JSON array of string tags
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isActive    Boolean @map("is_active")  @default(true)
+  createdAt   DateTime @map("created_at") @default(now())
+  updatedAt   DateTime @map("updated_at") @updatedAt
 
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   appointments Appointment[]
 
   @@index([tenantId, isActive])
   @@index([tenantId, role])
+  @@map("staff_members")
 }
 
 model AttendanceLog {
   id                  String    @id @default(uuid())
-  tenantId            String
-  customerId          String
-  batchOrClass        String
+  tenantId            String @map("tenant_id")
+  customerId          String @map("customer_id")
+  batchOrClass        String @map("batch_or_class")
   date                String
   status              String    @default("PRESENT") // PRESENT | ABSENT | LATE | ON_LEAVE
-  guardianPhone       String
-  notifiedAt          DateTime?
-  guardianReplyStatus String    @default("PENDING") // PENDING | ACKNOWLEDGED_LEAVE | ACKNOWLEDGED_LATE | NO_REPLY
-  guardianReplyText   String?
-  followUpTaskId      String?
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
+  guardianPhone       String @map("guardian_phone")
+  notifiedAt          DateTime? @map("notified_at")
+  guardianReplyStatus String @map("guardian_reply_status")    @default("PENDING") // PENDING | ACKNOWLEDGED_LEAVE | ACKNOWLEDGED_LATE | NO_REPLY
+  guardianReplyText   String? @map("guardian_reply_text")
+  followUpTaskId      String? @map("follow_up_task_id")
+  createdAt           DateTime @map("created_at")  @default(now())
+  updatedAt           DateTime @map("updated_at")  @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -595,19 +622,20 @@ model AttendanceLog {
   @@index([tenantId, batchOrClass, date])
   @@index([customerId, date])
   @@index([tenantId, guardianReplyStatus])
+  @@map("attendance_logs")
 }
 
 model StaffFollowUpTask {
   id               String    @id @default(uuid())
-  tenantId         String
-  customerId       String
-  assignedToUserId String?
-  taskType         String    @default("ATTENDANCE_CALL") // ATTENDANCE_CALL | GYM_RENEWAL_CALL | GENERAL
+  tenantId         String @map("tenant_id")
+  customerId       String @map("customer_id")
+  assignedToUserId String? @map("assigned_to_user_id")
+  taskType         String @map("task_type")    @default("ATTENDANCE_CALL") // ATTENDANCE_CALL | GYM_RENEWAL_CALL | GENERAL
   status           String    @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED
-  dueAt            DateTime
+  dueAt            DateTime @map("due_at")
   notes            String?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+  createdAt        DateTime @map("created_at")  @default(now())
+  updatedAt        DateTime @map("updated_at")  @updatedAt
 
   tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -615,22 +643,23 @@ model StaffFollowUpTask {
 
   @@index([tenantId, status, dueAt])
   @@index([customerId])
+  @@map("staff_follow_up_tasks")
 }
 
 model Membership {
   id                 String    @id @default(uuid())
-  tenantId           String
-  customerId         String
-  planName           String
-  priceAmount        Int       @default(0)
-  startDate          DateTime  @default(now())
-  expiryDate         DateTime
-  paymentStatus      String    @default("PENDING") // PAID | PENDING | OVERDUE
+  tenantId           String @map("tenant_id")
+  customerId         String @map("customer_id")
+  planName           String @map("plan_name")
+  priceAmount        Int @map("price_amount")       @default(0)
+  startDate          DateTime @map("start_date")  @default(now())
+  expiryDate         DateTime @map("expiry_date")
+  paymentStatus      String @map("payment_status")    @default("PENDING") // PAID | PENDING | OVERDUE
   status             String    @default("ACTIVE") // ACTIVE | EXPIRING_SOON | EXPIRED | CANCELLED
-  lastReminderSentAt DateTime?
-  autoSyncSheetRowId String?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  lastReminderSentAt DateTime? @map("last_reminder_sent_at")
+  autoSyncSheetRowId String? @map("auto_sync_sheet_row_id")
+  createdAt          DateTime @map("created_at")  @default(now())
+  updatedAt          DateTime @map("updated_at")  @updatedAt
 
   tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
@@ -638,4 +667,5 @@ model Membership {
   @@index([tenantId, status, expiryDate])
   @@index([customerId])
   @@index([tenantId, paymentStatus])
+  @@map("memberships")
 }
