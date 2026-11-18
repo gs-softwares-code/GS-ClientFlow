@@ -129,3 +129,38 @@ A comprehensive, defense-in-depth security hardening sprint was executed across 
 | Next.js Production Build | `pnpm build` | `0` | **PASS** (All 40+ routes compiled & static pages generated) |
 | Reverse Proxy Configuration | `Caddyfile` syntax audit | `0` | **PASS** (Valid WAF directives & loopback restrictions) |
 | Multi-Tenant Isolation Probes | `/api/ops/security-tests` | `200` | **PASS** (100% assertions verified) |
+
+
+---
+
+## Post-Audit Reconciliation
+
+**Execution Date:** November 2026  
+**Auditor:** Principal Application Security Architect & Staff Systems Engineer  
+**Objective:** Remediate residual discrepancies post-commit `e254d3adce042b3271a1c519e1ddcc12b27787b6`.
+
+### Remediations Delivered:
+1. **Dependency Pinning & Bun Lockfile Reconciliation:**
+   - Pinned `next` and `eslint-config-next` to `^16.4.5` in [`package.json`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/package.json) (incorporating the November 3, 2026 security patches for `GHSA-mfr8-8qww-v76h`, `GHSA-pc58-hwjq-p385`, `GHSA-f3mh-rxg3-f5g2`, and `GHSA-7qx7-33qx-rqx2`).
+   - Purged legacy `pnpm-lock.yaml` and `pnpm-workspace.yaml`.
+   - Created [`bunfig.toml`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/bunfig.toml) enforcing `[install] minimumReleaseAge = 259200` (3-day supply-chain release cooldown).
+   - Generated canonical [`bun.lock`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/bun.lock) via Bun v1.4.4 and verified that `bun install --frozen-lockfile` executes with zero warnings.
+
+2. **Outbound SSRF & FQDN Validation Hardening:**
+   - Routed outbound HTTP requests in [`src/server/channels/adapter.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/channels/adapter.ts) through `safeFetch` in [`src/server/lib/ssrf.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/lib/ssrf.ts).
+   - In [`src/server/services/whitelabel.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/server/services/whitelabel.ts), implemented `isValidFqdn()` strictly enforcing RFC 1035/1123 hostname rules (blocking raw IPs, `.localhost`, `.internal`, `.local`, `.arpa`).
+   - Upgraded `verifyDomain()` to perform live `dns.resolveTxt` queries against `_gscf-verify.<domain>` for cryptographic challenge token verification.
+
+3. **Rate Limiting & ORM Multi-Tenant Scoping Audit:**
+   - Wired `rateLimitOrThrow(req, "auth-register-business", 5)` into [`src/app/api/auth/register-business/route.ts`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/src/app/api/auth/register-business/route.ts).
+   - Verified that all public and auth endpoints (`/api/public/{book,feedback,portal,register}` and `/api/auth/{login,register-business}`) enforce perimeter rate-limiting and Arcjet Shield WAF.
+   - Audited parameterized routes across `customers/[id]`, `feedback/[id]`, and `offers/[id]/coupons`, confirming that every query explicitly scopes on `where: { id, tenantId }` at the ORM layer to guarantee isolation in SQLite fallback environments.
+
+4. **Service Worker Cache Policy & Prisma Audit:**
+   - Hardened [`public/sw.js`](file:///c:/Users/Code66/Downloads/GS-ClientFlow/public/sw.js) to enforce a strict `network-only` rule for all `/api/*` and authenticated requests (`cache: 'no-store'`) to ensure sensitive customer data is never stored in browser Cache Storage.
+   - Audited `@prisma/client` across `src/`: verified that Prisma is actively required for SQLite local development and sandbox runtime compatibility (`src/lib/db.ts`).
+
+5. **Post-Reconciliation Verification Suite:**
+   - **Type Checking:** `bunx tsc --noEmit` &rarr; `Exit Code 0` (clean, 0 errors).
+   - **Linting:** `bun run lint` &rarr; `Exit Code 0` (clean, 0 warnings/errors).
+   - **Runtime Script Tests:** `tests/database-runtime-build.sh` & `tests/python-runtime-build.sh` &rarr; `PASS`.

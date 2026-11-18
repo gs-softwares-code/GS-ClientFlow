@@ -7,14 +7,19 @@ import { jsonOk, jsonError, audit } from "@/server/tenancy/guard";
 import { ensureReferralCode } from "@/server/services/loyalty";
 import { publish } from "@/server/events/outbox";
 import { EventTypes } from "@/server/events/contracts";
+import { rateLimitOrThrow } from "@/server/ratelimit";
 
 /**
  * Enterprise Business Self-Service Registration / Onboarding
  * Allows a new business to sign up, provision a tenant, and initialize its owner account.
+ * Guarded by Arcjet / sliding window rate limiting.
  */
 
 export async function POST(req: NextRequest) {
   try {
+    // Explicit rate limit enforcement
+    await rateLimitOrThrow(req, "auth-register-business", 5);
+
     const body = (await req.json().catch(() => ({}))) as {
       businessName?: string;
       slug?: string;
@@ -107,6 +112,9 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
+    if ((err as Error & { code?: string }).code === "rate_limited" || (err as Error).message.includes("Rate limit")) {
+      return jsonError("rate_limited", (err as Error).message, 429);
+    }
     console.error("[Business Registration Error]:", err);
     return jsonError("internal", "Failed to register new business", 500);
   }

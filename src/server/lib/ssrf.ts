@@ -177,3 +177,8 @@ export async function safeOutboundFetch(
 
   return fetch(url, safeInit);
 }
+
+/**
+ * Convenience alias for safeOutboundFetch
+ */
+export const safeFetch = safeOutboundFetch;

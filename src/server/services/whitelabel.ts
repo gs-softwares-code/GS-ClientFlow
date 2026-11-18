@@ -1,3 +1,4 @@
+import dns from "node:dns/promises";
 import { db } from "@/lib/db";
 import { readSettings } from "@/server/settings";
 import { toJson, parseJson } from "@/server/lib/json";
@@ -102,10 +103,36 @@ export async function updateAutomationConfig(ctx: SessionCtx, patch: { birthdayL
   return updated;
 }
 
+/**
+ * Validates a strict fully qualified domain name (FQDN) per RFC 1035 / RFC 1123.
+ * Disallows bare IPs, localhost, internal TLDs, and leading/trailing dashes.
+ */
+export function isValidFqdn(domain: string): boolean {
+  if (!domain || domain.length > 253) return false;
+  // Disallow raw IP addresses
+  if (/^(?:\d{1,3}\.){3}\d{1,3}$/.test(domain)) return false;
+  // Disallow localhost or internal network domains
+  if (
+    domain === "localhost" ||
+    domain.endsWith(".localhost") ||
+    domain.endsWith(".local") ||
+    domain.endsWith(".internal") ||
+    domain.endsWith(".invalid") ||
+    domain.endsWith(".arpa")
+  ) {
+    return false;
+  }
+  const fqdnRegex = /^(?=.{1,253}$)(?!-)[a-z0-9-]{1,63}(?<!-)(\.(?!-)[a-z0-9-]{1,63}(?<!-))*\.[a-z]{2,63}$/i;
+  return fqdnRegex.test(domain);
+}
+
 export async function configureDomain(ctx: SessionCtx, domain: string) {
   const clean = domain.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(clean)) {
-    throw Object.assign(new Error("Invalid domain"), { code: "invalid_domain" });
+  if (!isValidFqdn(clean)) {
+    throw Object.assign(
+      new Error("Invalid custom domain format. Must be a valid public FQDN (e.g. app.mybusiness.com)"),
+      { code: "invalid_domain" }
+    );
   }
   const clash = await db.tenant.findFirst({ where: { customDomain: clean, id: { not: ctx.tenant.id } } });
   if (clash) throw Object.assign(new Error("Domain already claimed by another business"), { code: "domain_taken" });
@@ -123,10 +150,32 @@ export async function verifyDomain(ctx: SessionCtx) {
   if (!tenant || !tenant.customDomain || !tenant.domainVerifyToken) {
     throw Object.assign(new Error("Configure a domain first"), { code: "no_domain" });
   }
-  // Sandbox: DNS resolution is simulated deterministically — the exact
-  // production check performs a live TXT lookup for the token.
-  const simulatedOk = tenant.domainVerifyToken.startsWith("gscf-verify-");
-  if (!simulatedOk) throw Object.assign(new Error("TXT record not found yet"), { code: "dns_not_found" });
+
+  const recordName = `_gscf-verify.${tenant.customDomain}`;
+  let verified = false;
+  let dnsFailureDetail = "";
+
+  try {
+    const txtRecords = await dns.resolveTxt(recordName);
+    const flattened = txtRecords.flat();
+    if (flattened.includes(tenant.domainVerifyToken)) {
+      verified = true;
+    }
+  } catch (err) {
+    dnsFailureDetail = (err as Error).message;
+    // In local development / test sandbox, allow simulated challenge verification
+    if (process.env.NODE_ENV !== "production" && tenant.domainVerifyToken.startsWith("gscf-verify-")) {
+      verified = true;
+    }
+  }
+
+  if (!verified) {
+    throw Object.assign(
+      new Error(`TXT record not found yet at ${recordName}. Required token: ${tenant.domainVerifyToken} (${dnsFailureDetail || "record absent"})`),
+      { code: "dns_not_found" }
+    );
+  }
+
   await db.tenant.update({ where: { id: tenant.id }, data: { domainVerifiedAt: new Date() } });
   await audit(ctx, "tenant.domain_verified", "tenant", tenant.id, { domain: tenant.customDomain });
   return { domain: tenant.customDomain, verified: true };

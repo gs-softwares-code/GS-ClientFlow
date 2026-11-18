@@ -99,3 +99,34 @@ export function pruneBuckets(olderThanMs = 10 * 60_000): void {
     if (now - bucket.last > olderThanMs) buckets.delete(key);
   }
 }
+
+/**
+ * Unified rate limit & WAF enforcement helper for standalone route handlers
+ */
+export async function rateLimitOrThrow(
+  req: NextRequest,
+  routeName: string,
+  limitPerMinute = 10
+): Promise<void> {
+  const ajResult = await arcjetEvaluate(req);
+  if (!ajResult.allowed) {
+    const err = new Error(ajResult.reason || "Perimeter security policy violation");
+    (err as Error & { code?: string; statusCode?: number }).code = "rate_limited";
+    (err as Error & { code?: string; statusCode?: number }).statusCode = 429;
+    throw err;
+  }
+
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    "127.0.0.1";
+
+  const rl = rateLimit(`ip:${ip}:${routeName}`, limitPerMinute, limitPerMinute / 60);
+  if (!rl.ok) {
+    const err = new Error(`Rate limit exceeded for ${routeName}. Try again in ${Math.ceil(rl.retryAfterMs / 1000)}s.`);
+    (err as Error & { code?: string; statusCode?: number; retryAfterMs?: number }).code = "rate_limited";
+    (err as Error & { code?: string; statusCode?: number; retryAfterMs?: number }).statusCode = 429;
+    (err as Error & { code?: string; statusCode?: number; retryAfterMs?: number }).retryAfterMs = rl.retryAfterMs;
+    throw err;
+  }
+}

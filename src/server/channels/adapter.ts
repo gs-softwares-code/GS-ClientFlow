@@ -5,6 +5,7 @@ import { stableHash } from "@/server/lib/ids";
 import { readSettings, type TenantSettings } from "@/server/settings";
 import { meterUsage } from "@/server/usage";
 import { logEvent } from "@/server/logs";
+import { safeFetch } from "@/server/lib/ssrf";
 
 /**
  * Channel delivery adapter.
@@ -127,6 +128,26 @@ async function attempt(
   hashKey: string,
   params: SendParams
 ): Promise<SendResult> {
+  // If an external webhook/provider URL is specified, route through SSRF validator
+  const outboundUrl = process.env.CHANNEL_WEBHOOK_URL;
+  if (outboundUrl) {
+    try {
+      await safeFetch(outboundUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messageId,
+          channel: params.channel,
+          to: params.customer.email || params.customer.phone,
+          subject: params.subject,
+          body: params.body,
+        }),
+      }, { allowHttpInDev: true });
+    } catch (err) {
+      await logEvent("warn", "channel", `Outbound provider SSRF or network error: ${(err as Error).message}`, { messageId }, params.tenant.id);
+    }
+  }
+
   const h = stableHash(hashKey);
   const now = new Date();
 
