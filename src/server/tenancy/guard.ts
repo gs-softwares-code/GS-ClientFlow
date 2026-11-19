@@ -4,7 +4,7 @@ import type { Tenant } from "@prisma/client";
 import { db } from "@/lib/db";
 import { getSessionCtx, type SessionCtx } from "@/server/tenancy/session";
 import { readSettings, type TenantSettings } from "@/server/settings";
-import { rateLimit, pruneBuckets, arcjetEvaluate } from "@/server/ratelimit";
+import { rateLimitDistributed, pruneBuckets, arcjetEvaluate } from "@/server/ratelimit";
 import { meterUsage } from "@/server/usage";
 import { logEvent } from "@/server/logs";
 import { toJson } from "@/server/lib/json";
@@ -67,8 +67,8 @@ export function withRoute(
 
       tenantIdForLog = ctx.tenant.id;
 
-      // 3. Layer 3: Tenant-scoped rate limiting
-      const rl = rateLimit(
+      // 3. Layer 3: Tenant-scoped distributed rate limiting
+      const rl = await rateLimitDistributed(
         `t:${ctx.tenant.id}:${routeName}`,
         opts.limitPerMinute ?? 90,
         opts.limitPerMinute ? opts.limitPerMinute / 60 : 1.5
@@ -132,7 +132,7 @@ export function withPublicRoute(
       const ip =
         req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? req.headers.get("x-real-ip") ?? "local";
 
-      const rl = rateLimit(`ip:${ip}:${routeName}`, opts.limitPerMinute ?? 10, (opts.limitPerMinute ?? 10) / 60);
+      const rl = await rateLimitDistributed(`ip:${ip}:${routeName}`, opts.limitPerMinute ?? 10, (opts.limitPerMinute ?? 10) / 60);
       if (!rl.ok) {
         await logEvent("warn", "ratelimit", `429 (public) on ${routeName}`, { ip }, tenant.id);
         return jsonError("rate_limited", "Too many requests — try again shortly", 429, { retryAfterMs: rl.retryAfterMs });

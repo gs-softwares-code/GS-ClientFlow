@@ -36,7 +36,12 @@ export type TickSummary = {
   scheduledProcessed: number;
 };
 
-export async function tick(): Promise<TickSummary> {
+/**
+ * Drain bounded outbox events batch.
+ * Safe for concurrent invocations via atomic lease claiming.
+ */
+export async function drainOutboxBatch(opts: { limit?: number } = {}): Promise<TickSummary> {
+  const limit = Math.min(Math.max(opts.limit ?? CLAIM_LIMIT, 1), 100);
   const stats = workerStats();
   const summary: TickSummary = { claimed: 0, processed: 0, failed: 0, dead: 0, retried: 0, scheduledProcessed: 0 };
   stats.running = true;
@@ -44,12 +49,12 @@ export async function tick(): Promise<TickSummary> {
   stats.lastTickAt = Date.now();
 
   try {
-    // -------- 1. claim outbox events
+    // -------- 1. claim outbox events atomically
     const now = new Date();
     const due = await db.outboxEvent.findMany({
       where: { status: "pending", availableAt: { lte: now } },
       orderBy: [{ availableAt: "asc" }, { id: "asc" }],
-      take: CLAIM_LIMIT,
+      take: limit,
     });
     summary.claimed = due.length;
 
@@ -167,7 +172,7 @@ export async function tick(): Promise<TickSummary> {
     const actions = await db.scheduledAction.findMany({
       where: { status: "pending", dueAt: { lte: new Date() } },
       orderBy: { dueAt: "asc" },
-      take: 15,
+      take: Math.min(limit, 25),
     });
     for (const action of actions) {
       try {
@@ -201,6 +206,10 @@ export async function tick(): Promise<TickSummary> {
     stats.running = false;
   }
   return summary;
+}
+
+export async function tick(): Promise<TickSummary> {
+  return drainOutboxBatch({ limit: CLAIM_LIMIT });
 }
 
 async function processScheduledAction(actionId: string, tenantId: string, kind: string, payload: Record<string, string>) {

@@ -2,13 +2,12 @@ import type { NextConfig } from "next";
 
 /**
  * GS ClientFlow — Production Next.js Configuration
- * Hardened for multi-tenancy, strict asset isolation, and CVE mitigations.
+ * Hardened for multi-tenancy, strict asset isolation, CORS, and CVE mitigations.
  */
 
 const nextConfig: NextConfig = {
   output: "standalone",
   reactStrictMode: true,
-  // Remediate AVIF/SVG Image Optimization RCEs (GHSA-2xp9-vwfh-vxw4, CVE-2026-96889)
   images: {
     dangerouslyAllowSVG: false,
     contentDispositionType: "attachment",
@@ -20,7 +19,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // Perimeter HTTP security headers enforced at the Next.js runtime layer
   async headers() {
     return [
       {
@@ -34,11 +32,23 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        // Allow embeddable widget and client portal framing with tenant-scoping
+        // Allow public portal, booking, and embeddable widget cross-origin usage
+        source: "/api/public/:path*",
+        headers: [
+          { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, POST, OPTIONS" },
+          { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, X-Requested-With" },
+          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
+        ],
+      },
+      {
+        // Allow embeddable widget and client portal framing
         source: "/api/tenant/widget",
         headers: [
-          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
           { key: "Access-Control-Allow-Origin", value: "*" },
+          { key: "Access-Control-Allow-Methods", value: "GET, OPTIONS" },
+          { key: "Access-Control-Allow-Headers", value: "Content-Type, Authorization, X-Requested-With" },
+          { key: "Content-Security-Policy", value: "frame-ancestors *;" },
         ],
       },
     ];

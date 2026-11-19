@@ -631,3 +631,16 @@ export const memberships = pgTable(
     index("memberships_payment_status_idx").on(table.tenantId, table.paymentStatus),
   ]
 );
+
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    key: text("key").primaryKey(),
+    tokens: text("tokens").notNull(),
+    lastRefill: text("last_refill").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    index("rate_limits_expires_idx").on(table.expiresAt),
+  ]
+);

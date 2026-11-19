@@ -36,25 +36,31 @@ export async function register() {
   const stats = workerStats();
   stats.startedAt = Date.now();
 
-  const workerTimer = setInterval(() => {
-    void tick().catch((err) => {
-      console.error("[gscf] worker tick error:", err);
-    });
-  }, 4000);
+  // On Vercel Serverless, persistent setInterval loops freeze after response flush.
+  // Execution is handled reliably by scheduled HTTP cron ticks (/api/ops/cron/tick).
+  if (process.env.VERCEL !== "1") {
+    const workerTimer = setInterval(() => {
+      void tick().catch((err) => {
+        console.error("[gscf] worker tick error:", err);
+      });
+    }, 4000);
 
-  const schedulerTimer = setInterval(() => {
-    void runDueScans().catch((err) => {
-      console.error("[gscf] scheduler error:", err);
-    });
-  }, 45000);
+    const schedulerTimer = setInterval(() => {
+      void runDueScans().catch((err) => {
+        console.error("[gscf] scheduler error:", err);
+      });
+    }, 45000);
 
-  // Warm-up tick + scan so birthday events and engineered demos appear quickly.
-  void tick().catch(() => undefined);
-  void runDueScans().catch(() => undefined);
+    // Warm-up tick + scan so birthday events and engineered demos appear quickly.
+    void tick().catch(() => undefined);
+    void runDueScans().catch(() => undefined);
 
-  void logEvent("info", "boot", "GS ClientFlow automation worker started (4s tick, 45s scans)");
+    void logEvent("info", "boot", "GS ClientFlow automation worker started (4s tick, 45s scans)");
 
-  // Never let the timers keep the process alive artificially.
-  workerTimer.unref?.();
-  schedulerTimer.unref?.();
+    // Never let the timers keep the process alive artificially.
+    workerTimer.unref?.();
+    schedulerTimer.unref?.();
+  } else {
+    void logEvent("info", "boot", "GS ClientFlow booted on Vercel Serverless runtime. Background tasks triggered via Vercel Cron.");
+  }
 }

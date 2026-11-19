@@ -30,6 +30,10 @@ export type ScanSummary = {
 };
 
 export async function runDueScans(): Promise<ScanSummary> {
+  return evaluateScheduledTriggers();
+}
+
+export async function evaluateScheduledTriggers(): Promise<ScanSummary> {
   const summary: ScanSummary = {
     tenantsScanned: 0,
     birthdayEvents: 0,

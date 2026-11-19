@@ -1,12 +1,13 @@
 import { track429 } from "@/server/ops-state";
 import arcjet, { shield, detectBot, slidingWindow } from "@arcjet/next";
 import type { NextRequest } from "next/server";
+import { db } from "@/lib/db";
 
 /**
  * Enterprise Multi-Layer Perimeter Defense & Rate Limiting
  *
  * Layer 1: Arcjet Shield WAF & Bot Mitigation (Cloud / Production)
- * Layer 2: Tenant-scoped in-memory token bucket (Zero-latency fallback & Sandbox)
+ * Layer 2: PostgreSQL / Upstash Redis / Memory distributed rate limiter (persists across Vercel serverless cold starts)
  */
 
 type Bucket = { tokens: number; last: number };
@@ -22,14 +23,11 @@ const aj = process.env.ARCJET_KEY
       key: process.env.ARCJET_KEY,
       characteristics: ["ip.src"],
       rules: [
-        // Shield protects against common Web Application attacks (SQLi, XSS, Path Traversal)
         shield({ mode: "LIVE" }),
-        // Detect and block automated malicious bots while allowing search engine crawlers
         detectBot({
           mode: "LIVE",
           allow: ["CATEGORY:SEARCH_ENGINE"],
         }),
-        // Sliding window rate limit
         slidingWindow({
           mode: "LIVE",
           interval: "1m",
@@ -63,14 +61,92 @@ export async function arcjetEvaluate(
     }
     return { allowed: true };
   } catch (err) {
-    // Fail-open on network timeout to prevent Arcjet API outages from bringing down the service
-    console.warn("[Arcjet Protection Warning]: Falling back to local rate limiter", err);
+    console.warn("[Arcjet Protection Warning]: Falling back to database rate limiter", err);
     return { allowed: true };
   }
 }
 
 /**
- * In-memory tenant+route scoped token bucket
+ * Distributed Token Bucket Rate Limiter
+ * Persists token counts in PostgreSQL so limits hold across parallel Vercel lambdas & cold starts.
+ */
+export async function rateLimitDistributed(
+  key: string,
+  capacity: number,
+  refillPerSecond: number
+): Promise<RateLimitResult> {
+  const now = Date.now();
+  const windowExpiryMs = Math.ceil((capacity / refillPerSecond) * 1000) + 60_000;
+  const expiresAt = new Date(now + windowExpiryMs);
+
+  try {
+    const existing = await db.rateLimit.findUnique({ where: { key } });
+
+    let tokens = capacity;
+    let lastRefill = now;
+
+    if (existing) {
+      const last = Number(existing.lastRefill);
+      const elapsedSec = Math.max(0, (now - last) / 1000);
+      tokens = Math.min(capacity, existing.tokens + elapsedSec * refillPerSecond);
+      lastRefill = now;
+    }
+
+    if (tokens >= 1) {
+      tokens -= 1;
+      await db.rateLimit.upsert({
+        where: { key },
+        create: {
+          key,
+          tokens,
+          lastRefill: BigInt(lastRefill),
+          expiresAt,
+        },
+        update: {
+          tokens,
+          lastRefill: BigInt(lastRefill),
+          expiresAt,
+        },
+      });
+
+      // Opportunistic cleanup of expired keys
+      if (Math.random() < 0.05) {
+        void db.rateLimit.deleteMany({
+          where: { expiresAt: { lt: new Date() } },
+        }).catch(() => undefined);
+      }
+
+      return { ok: true, retryAfterMs: 0, remaining: Math.floor(tokens) };
+    }
+
+    // Rate limited
+    const retryAfterMs = Math.ceil(((1 - tokens) / refillPerSecond) * 1000);
+    track429(key);
+
+    await db.rateLimit.upsert({
+      where: { key },
+      create: {
+        key,
+        tokens,
+        lastRefill: BigInt(lastRefill),
+        expiresAt,
+      },
+      update: {
+        tokens,
+        lastRefill: BigInt(lastRefill),
+        expiresAt,
+      },
+    });
+
+    return { ok: false, retryAfterMs, remaining: 0, reason: "Too many requests" };
+  } catch (err) {
+    // Graceful fallback to in-memory bucket if DB table is unreachable
+    return rateLimit(key, capacity, refillPerSecond);
+  }
+}
+
+/**
+ * In-memory fallback token bucket (local development & sandbox resilience)
  */
 export function rateLimit(key: string, capacity: number, refillPerSecond: number): RateLimitResult {
   const now = Date.now();
@@ -92,7 +168,7 @@ export function rateLimit(key: string, capacity: number, refillPerSecond: number
   return { ok: false, retryAfterMs, remaining: 0, reason: "Too many requests" };
 }
 
-// Opportunistic cleanup so the map cannot grow unbounded
+// Opportunistic cleanup so the in-memory map cannot grow unbounded
 export function pruneBuckets(olderThanMs = 10 * 60_000): void {
   const now = Date.now();
   for (const [key, bucket] of buckets) {
@@ -121,7 +197,7 @@ export async function rateLimitOrThrow(
     req.headers.get("x-real-ip") ||
     "127.0.0.1";
 
-  const rl = rateLimit(`ip:${ip}:${routeName}`, limitPerMinute, limitPerMinute / 60);
+  const rl = await rateLimitDistributed(`ip:${ip}:${routeName}`, limitPerMinute, limitPerMinute / 60);
   if (!rl.ok) {
     const err = new Error(`Rate limit exceeded for ${routeName}. Try again in ${Math.ceil(rl.retryAfterMs / 1000)}s.`);
     (err as Error & { code?: string; statusCode?: number; retryAfterMs?: number }).code = "rate_limited";

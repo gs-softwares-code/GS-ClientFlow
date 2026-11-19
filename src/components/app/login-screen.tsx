@@ -107,7 +107,7 @@ export function LoginScreen({
   const selected = tenants.find((t) => t.slug === slug);
 
   return (
-    <div className="min-h-screen flex flex-col bg-background">
+    <div className="min-h-dvh flex flex-col bg-background">
       <div className="flex-1 mx-auto max-w-6xl w-full px-4 sm:px-6 py-10 grid lg:grid-cols-[1.1fr_0.9fr] gap-10 items-center">
         {/* Pitch */}
         <div>

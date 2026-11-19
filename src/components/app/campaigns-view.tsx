@@ -888,38 +888,62 @@ export default function CampaignsView({ ctx }: { ctx: AppCtx }) {
               ))}
             </div>
           ) : coupons && coupons.length > 0 ? (
-            <div className="max-h-[420px] overflow-auto rounded-xl border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="text-[10px] uppercase tracking-wide">
-                    <TableHead>Code</TableHead>
-                    <TableHead>Offer</TableHead>
-                    <TableHead>Holder</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Points</TableHead>
-                    <TableHead>Expires</TableHead>
-                    <TableHead>Redeemed</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {coupons.map((cp) => (
-                    <TableRow key={cp.id} className="text-xs">
-                      <TableCell className="font-mono">{cp.code}</TableCell>
-                      <TableCell className="max-w-[160px] truncate">{cp.offer?.title ?? "—"}</TableCell>
-                      <TableCell>{cp.customer?.name ?? "unassigned"}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`capitalize text-[10px] ${couponStatusClass(cp.status)}`}>
-                          {cp.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">{cp.pointsCost ?? "—"}</TableCell>
-                      <TableCell>{formatDate(cp.expiresAt)}</TableCell>
-                      <TableCell>{formatDate(cp.redeemedAt)}</TableCell>
+            <>
+              {/* Desktop Table */}
+              <div className="hidden md:block max-h-[420px] overflow-auto rounded-xl border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="text-[10px] uppercase tracking-wide">
+                      <TableHead>Code</TableHead>
+                      <TableHead>Offer</TableHead>
+                      <TableHead>Holder</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Points</TableHead>
+                      <TableHead>Expires</TableHead>
+                      <TableHead>Redeemed</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                  </TableHeader>
+                  <TableBody>
+                    {coupons.map((cp) => (
+                      <TableRow key={cp.id} className="text-xs">
+                        <TableCell className="font-mono">{cp.code}</TableCell>
+                        <TableCell className="max-w-[160px] truncate">{cp.offer?.title ?? "—"}</TableCell>
+                        <TableCell>{cp.customer?.name ?? "unassigned"}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={`capitalize text-[10px] ${couponStatusClass(cp.status)}`}>
+                            {cp.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums">{cp.pointsCost ?? "—"}</TableCell>
+                        <TableCell>{formatDate(cp.expiresAt)}</TableCell>
+                        <TableCell>{formatDate(cp.redeemedAt)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card Stack */}
+              <div className="block md:hidden space-y-2.5">
+                {coupons.map((cp) => (
+                  <Card key={`m-${cp.id}`} className="p-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-mono text-sm font-bold tracking-wider">{cp.code}</span>
+                        <div className="truncate text-xs text-muted-foreground">{cp.offer?.title ?? "General Coupon"}</div>
+                      </div>
+                      <Badge variant="outline" className={`capitalize text-[10px] ${couponStatusClass(cp.status)}`}>
+                        {cp.status}
+                      </Badge>
+                    </div>
+                    <div className="mt-2 flex items-center justify-between border-t pt-2 text-[11px] text-muted-foreground">
+                      <span>Holder: <strong className="text-foreground">{cp.customer?.name ?? "unassigned"}</strong></span>
+                      <span>Expires: {formatDate(cp.expiresAt)}</span>
+                    </div>
+                  </Card>
+                ))}
+              </div>
+            </>
           ) : (
             <Card className="p-8 text-center">
               <Ticket className="mx-auto h-8 w-8 text-muted-foreground/60" />

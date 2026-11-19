@@ -286,7 +286,8 @@ export default function CustomersView({ ctx }: { ctx: AppCtx }) {
             </Alert>
           )}
 
-          <div className="overflow-x-auto rounded-xl border bg-card">
+          {/* Desktop Table View */}
+          <div className="hidden md:block overflow-x-auto rounded-xl border bg-card">
             <Table>
               <TableHeader>
                 <TableRow className="hover:bg-transparent">
@@ -313,6 +314,64 @@ export default function CustomersView({ ctx }: { ctx: AppCtx }) {
                 )}
               </TableBody>
             </Table>
+          </div>
+
+          {/* Mobile Card Stack */}
+          <div className="block md:hidden space-y-2.5">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, i) => (
+                <Card key={`sk-m-${i}`} className="p-3.5">
+                  <Skeleton className="h-12 w-full" />
+                </Card>
+              ))
+            ) : items.length ? (
+              items.map((c) => (
+                <Card
+                  key={`m-${c.id}`}
+                  className="p-3.5 cursor-pointer hover:border-[var(--brand)] transition-colors active:bg-muted/50"
+                  onClick={() => setDetailId(c.id)}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Avatar className="h-9 w-9 shrink-0">
+                        <AvatarFallback className="bg-[var(--brand)]/10 text-xs font-semibold text-[var(--brand)]">
+                          {initials(c.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold">{c.name}</div>
+                        <div className="truncate text-xs text-muted-foreground">{c.email || c.phone || "No contact"}</div>
+                      </div>
+                    </div>
+                    <Badge variant={c.status === "active" ? "default" : "secondary"} className="shrink-0 text-[10px]">
+                      {c.status}
+                    </Badge>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between border-t pt-2 text-xs">
+                    <span className="text-muted-foreground">{c.visitCount} visits</span>
+                    <span className="font-semibold text-foreground">{formatINR(c.totalSpendCents)}</span>
+                  </div>
+
+                  {c.tags.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {c.tags.slice(0, 3).map((t) => (
+                        <Badge key={t.tag.id} variant="outline" className="text-[10px]" style={{ color: t.tag.color, borderColor: t.tag.color }}>
+                          {t.tag.name}
+                        </Badge>
+                      ))}
+                      {c.tags.length > 3 && (
+                        <span className="text-[10px] text-muted-foreground">+{c.tags.length - 3}</span>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              ))
+            ) : (
+              <Card className="p-6 text-center text-sm text-muted-foreground">
+                No customers match the current filters.
+              </Card>
+            )}
           </div>
 
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -525,6 +584,16 @@ function CustomerDrawer({ customerId, onClose, onChanged }: { customerId: string
 
   const saveTags = async () => {
     if (!detail) return;
+    const previousTags = [...selectedTagIds];
+    const previousDetailTags = detail.tags;
+
+    // Optimistically update local detail view
+    const optimisticTags = selectedTagIds.map((id) => {
+      const found = allTags.find((t) => t.id === id);
+      return { tag: { id, name: found?.name ?? "Tag", color: found?.color ?? "#0f766e" } };
+    });
+    setDetail({ ...detail, tags: optimisticTags });
+
     setSavingTags(true);
     try {
       await apiPost(`/api/customers/${detail.id}/tags`, { tagIds: selectedTagIds });
@@ -532,6 +601,9 @@ function CustomerDrawer({ customerId, onClose, onChanged }: { customerId: string
       await loadDetail();
       onChanged();
     } catch (err) {
+      // Rollback optimistic update
+      setSelectedTagIds(previousTags);
+      setDetail((d) => (d ? { ...d, tags: previousDetailTags } : d));
       toast({ title: "Could not save tags", description: (err as Error).message, variant: "destructive" });
     } finally {
       setSavingTags(false);
@@ -540,12 +612,19 @@ function CustomerDrawer({ customerId, onClose, onChanged }: { customerId: string
 
   const setArchived = async (next: boolean) => {
     if (!detail) return;
+    const previousStatus = detail.status;
+
+    // Optimistic UI update
+    setDetail({ ...detail, status: next ? "archived" : "active" });
+
     try {
       await apiPatch(`/api/customers/${detail.id}`, { status: next ? "archived" : "active" });
       toast({ title: next ? "Customer archived" : "Customer restored", description: next ? "Hidden from active lists and audiences" : "Back in active lists and audiences" });
       await loadDetail();
       onChanged();
     } catch (err) {
+      // Rollback optimistic state
+      setDetail((d) => (d ? { ...d, status: previousStatus } : d));
       toast({ title: "Could not update status", description: (err as Error).message, variant: "destructive" });
     }
   };

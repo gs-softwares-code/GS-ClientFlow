@@ -669,3 +669,13 @@ model Membership {
   @@index([tenantId, paymentStatus])
   @@map("memberships")
 }
+
+model RateLimit {
+  key        String   @id
+  tokens     Float
+  lastRefill BigInt   @map("last_refill")
+  expiresAt  DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("rate_limits")
+}

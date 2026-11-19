@@ -1,19 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   LayoutDashboard, Users, Star, Workflow, Megaphone, Gift, CalendarClock,
   Palette, BarChart3, ShieldCheck, Globe, ClipboardList, Sun, Moon,
-  LogOut, RefreshCw, ChevronsUpDown, HeartPulse,
+  LogOut, RefreshCw, ChevronsUpDown, HeartPulse, Menu, MoreHorizontal,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiGet, apiPost } from "@/lib/client/api";
-import { timeAgo } from "@/lib/client/format";
 import type { AppCtx, AppUser, TenantInfo, TenantSummary, UsageSnapshot, EventCatalogEntry } from "@/lib/client/types";
 import { LoginScreen } from "@/components/app/login-screen";
 import { DashboardView } from "@/components/app/dashboard-view";
@@ -33,14 +34,61 @@ type BootResponse = {
 type Heartbeat = { pending: number; dead: number; lastTickAt: number | null };
 
 export default function Page() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-dvh flex flex-col bg-background">
+        <div className="flex-1 grid place-items-center">
+          <div className="flex items-center gap-3 text-muted-foreground">
+            <HeartPulse className="h-5 w-5 animate-pulse text-[var(--brand,#0f766e)]" />
+            <span className="text-sm">Booting GS ClientFlow…</span>
+          </div>
+        </div>
+      </div>
+    }>
+      <ClientFlowApp />
+    </Suspense>
+  );
+}
+
+function ClientFlowApp() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const viewParam = searchParams.get("view") as ViewId | null;
+
   const [ctx, setCtx] = useState<AppCtx | null>(null);
   const [tenantsPublic, setTenantsPublic] = useState<TenantSummary[]>([]);
   const [eventCatalog, setEventCatalog] = useState<EventCatalogEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<ViewId>("dashboard");
+  const [view, setViewState] = useState<ViewId>(viewParam ?? "dashboard");
   const [dark, setDark] = useState(false);
   const [heartbeat, setHeartbeat] = useState<Heartbeat | null>(null);
+  const [moreSheetOpen, setMoreSheetOpen] = useState(false);
   const { toast } = useToast();
+
+  // Sync view state with URL parameters
+  const setView = useCallback((nextView: ViewId) => {
+    setViewState(nextView);
+    const params = new URLSearchParams(window.location.search);
+    if (nextView === "dashboard") {
+      params.delete("view");
+    } else {
+      params.set("view", nextView);
+    }
+    const query = params.toString();
+    const url = query ? `?${query}` : window.location.pathname;
+    window.history.pushState(null, "", url);
+  }, []);
+
+  // Sync on browser back/forward buttons
+  useEffect(() => {
+    const handlePopState = () => {
+      const currentParams = new URLSearchParams(window.location.search);
+      const v = (currentParams.get("view") as ViewId) ?? "dashboard";
+      setViewState(v);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   const bootstrap = useCallback(async () => {
     try {
@@ -69,7 +117,7 @@ export default function Page() {
     void bootstrap();
   }, [bootstrap]);
 
-  // Footer worker heartbeat (cheap poll of the ops endpoint)
+  // Footer worker heartbeat
   useEffect(() => {
     if (!ctx) return;
     let alive = true;
@@ -117,6 +165,10 @@ export default function Page() {
   const groups = useMemo(() => [...new Set(activeNav.map((n) => n.group))], [activeNav]);
 
   const logout = async () => {
+    // Notify service worker to purge tenant caches
+    if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: "CLEAR_TENANT_CACHE" });
+    }
     await apiPost("/api/auth/logout").catch(() => undefined);
     setCtx(null);
     setView("dashboard");
@@ -125,6 +177,9 @@ export default function Page() {
 
   const switchTenant = async (tenantId: string) => {
     try {
+      if ("serviceWorker" in navigator && navigator.serviceWorker.controller) {
+        navigator.serviceWorker.controller.postMessage({ type: "CLEAR_TENANT_CACHE" });
+      }
       await apiPost("/api/auth/switch-tenant", { tenantId });
       setView("dashboard");
       await bootstrap();
@@ -142,7 +197,7 @@ export default function Page() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex flex-col bg-background">
+      <div className="min-h-dvh flex flex-col bg-background">
         <div className="flex-1 grid place-items-center">
           <div className="flex items-center gap-3 text-muted-foreground">
             <HeartPulse className="h-5 w-5 animate-pulse text-[var(--brand,#0f766e)]" />
@@ -197,9 +252,11 @@ export default function Page() {
     }
   })();
 
+  const primaryMobileNav: ViewId[] = ["dashboard", "appointments", "customers", "automation"];
+
   return (
     <div
-      className="min-h-screen flex flex-col bg-background text-foreground"
+      className="min-h-dvh flex flex-col bg-background text-foreground overflow-x-clip"
       style={{ ["--brand" as string]: (!t.brandColor || t.brandColor === "#000000" || t.brandColor === "#000") ? "#0f766e" : t.brandColor }}
     >
       {/* Header */}
@@ -233,12 +290,12 @@ export default function Page() {
                 </SelectContent>
               </Select>
             )}
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleDark} aria-label="Toggle theme">
+            <Button variant="ghost" size="icon" className="h-9 w-9 min-h-9 min-w-9" onClick={toggleDark} aria-label="Toggle theme">
               {dark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 gap-2">
+                <Button variant="outline" size="sm" className="h-9 gap-2">
                   <span className="hidden sm:inline text-xs">{ctx.user.name}</span>
                   <span className="sm:hidden text-xs">{ctx.user.name.split(" ")[0]}</span>
                   <ChevronsUpDown className="h-3.5 w-3.5 opacity-50" />
@@ -263,14 +320,14 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Mobile nav */}
-        <nav className="lg:hidden border-t overflow-x-auto">
+        {/* Scrollable top nav on tablet viewports */}
+        <nav className="hidden sm:block lg:hidden border-t overflow-x-auto">
           <div className="flex gap-1 px-3 py-2 w-max">
             {activeNav.map((n) => (
               <button
                 key={n.id}
                 onClick={() => setView(n.id)}
-                className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                   current.id === n.id ? "bg-[var(--brand)]/10 text-[var(--brand)]" : "text-muted-foreground hover:bg-accent"
                 }`}
               >
@@ -283,7 +340,7 @@ export default function Page() {
       </header>
 
       {/* Body */}
-      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 flex flex-1 gap-6 py-6">
+      <div className="mx-auto w-full max-w-7xl px-4 sm:px-6 flex flex-1 gap-6 py-6 pb-24 md:pb-8">
         {/* Desktop sidebar */}
         <aside className="hidden lg:block w-56 shrink-0">
           <div className="lg:sticky lg:top-20 space-y-5">
@@ -314,15 +371,84 @@ export default function Page() {
         <main className="flex-1 min-w-0">{viewEl}</main>
       </div>
 
+      {/* Mobile Bottom Navigation Bar (md:hidden) with Safe-Area padding */}
+      <div className="md:hidden fixed bottom-0 inset-x-0 z-50 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85 pb-[env(safe-area-inset-bottom)] shadow-lg">
+        <div className="grid grid-cols-5 h-14">
+          {primaryMobileNav.map((id) => {
+            const item = activeNav.find((n) => n.id === id);
+            if (!item) return null;
+            const Icon = item.icon;
+            const isActive = current.id === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => setView(item.id)}
+                className={`flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px] ${
+                  isActive ? "text-[var(--brand)] font-semibold" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Icon className={`h-4 w-4 ${isActive ? "scale-110" : ""}`} />
+                <span className="text-[10px] tracking-tight truncate max-w-[64px]">{item.label}</span>
+              </button>
+            );
+          })}
+
+          {/* More trigger opens bottom slide-over sheet */}
+          <Sheet open={moreSheetOpen} onOpenChange={setMoreSheetOpen}>
+            <SheetTrigger asChild>
+              <button
+                className={`flex flex-col items-center justify-center gap-1 transition-colors min-h-[44px] ${
+                  !primaryMobileNav.includes(current.id) ? "text-[var(--brand)] font-semibold" : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <MoreHorizontal className="h-4 w-4" />
+                <span className="text-[10px] tracking-tight">More</span>
+              </button>
+            </SheetTrigger>
+            <SheetContent side="bottom" className="rounded-t-2xl max-h-[75dvh] overflow-y-auto px-4 pb-8">
+              <SheetHeader className="pb-2">
+                <SheetTitle className="text-sm">All Modules &amp; Tools</SheetTitle>
+              </SheetHeader>
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                {activeNav.map((n) => {
+                  const Icon = n.icon;
+                  const isActive = current.id === n.id;
+                  return (
+                    <button
+                      key={n.id}
+                      onClick={() => {
+                        setView(n.id);
+                        setMoreSheetOpen(false);
+                      }}
+                      className={`flex items-center gap-2.5 rounded-lg border p-3 text-xs font-medium text-left transition-colors min-h-[44px] ${
+                        isActive
+                          ? "border-[var(--brand)] bg-[var(--brand)]/10 text-[var(--brand)]"
+                          : "border-border text-foreground hover:bg-muted"
+                      }`}
+                    >
+                      <Icon className="h-4 w-4 shrink-0 text-[var(--brand)]" />
+                      <div className="min-w-0">
+                        <div className="truncate font-semibold">{n.label}</div>
+                        <div className="truncate text-[10px] text-muted-foreground">{n.group}</div>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </SheetContent>
+          </Sheet>
+        </div>
+      </div>
+
       {/* Sticky footer */}
-      <footer className="mt-auto border-t bg-muted/40">
+      <footer className="mt-auto border-t bg-muted/40 hidden md:block">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
           <span className="font-medium">GS ClientFlow</span>
           <span>multi-tenant client relationship OS</span>
           <span className="hidden sm:inline">·</span>
           <span>{t.name} ({t.slug})</span>
           <span className="hidden sm:inline">·</span>
-          <span className="hidden sm:inline">Sandbox demo: seeded demo dataset, live-computed analytics</span>
+          <span className="hidden sm:inline">Production Multi-Tenant Engine</span>
           <span className="ml-auto flex items-center gap-1.5">
             <span className={`h-1.5 w-1.5 rounded-full ${heartbeat && heartbeat.dead > 0 ? "bg-destructive" : "bg-emerald-500"}`} />
             worker {heartbeat ? `${heartbeat.pending} queued · ${heartbeat.dead} dead` : "…"}
@@ -333,7 +459,7 @@ export default function Page() {
   );
 }
 
-/** Loads a view module lazily so first paint stays fast. */
+/** Loads a view module lazily with skeleton placeholder so initial payload remains minimal */
 function LazyView({ importer, ctx }: { importer: () => Promise<{ default: React.ComponentType<{ ctx: AppCtx }> }>; ctx: AppCtx }) {
   const [Comp, setComp] = useState<React.ComponentType<{ ctx: AppCtx }> | null>(null);
   useEffect(() => {

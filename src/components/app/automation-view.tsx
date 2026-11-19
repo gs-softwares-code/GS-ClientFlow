@@ -727,6 +727,28 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
                         <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">no consent check</Badge>
                       ) : null}
                     </div>
+                    <div className="flex flex-col gap-2 rounded-lg border bg-muted/30 p-2.5 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-blue-500/20 text-[10px] font-bold text-blue-700 dark:text-blue-300">1</span>
+                        <span className="font-semibold text-foreground">Trigger</span>
+                        <Badge variant="outline" className="text-[10px] ml-auto">{w.triggerType}</Badge>
+                      </div>
+                      <div className="ml-2.5 border-l-2 border-dashed border-muted-foreground/30 pl-4 py-1">
+                        <p className="text-[11px] text-muted-foreground">{describeTrigger(w, ctx.tenant.settings.birthdayLeadDays, ctx.tenant.settings.inactiveDays)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-[10px] font-bold text-amber-700 dark:text-amber-300">2</span>
+                        <span className="font-semibold text-foreground">Condition &amp; Audience</span>
+                      </div>
+                      <div className="ml-2.5 border-l-2 border-dashed border-muted-foreground/30 pl-4 py-1">
+                        <p className="text-[11px] text-muted-foreground">{audienceLine(w)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-[10px] font-bold text-emerald-700 dark:text-emerald-300">3</span>
+                        <span className="font-semibold text-foreground">Outbox Action</span>
+                        <Badge variant="outline" className="text-[10px] uppercase ml-auto">{w.channel}</Badge>
+                      </div>
+                    </div>
                     {w.offsetMinutes && w.offsetMinutes > 0 ? (
                       <p className="text-muted-foreground">waits {humanDelay(w.offsetMinutes)} before sending</p>
                     ) : null}

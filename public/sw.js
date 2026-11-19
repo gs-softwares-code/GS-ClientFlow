@@ -1,5 +1,5 @@
 // GS-ClientFlow Security-Enforced Service Worker
-// Enforces strict network-only routing for all /api/* routes to prevent cache storage persistence.
+// Enforces strict network-only routing for /api/* routes to prevent cache storage persistence and cross-tenant poisoning.
 
 self.addEventListener('install', () => {
   self.skipWaiting();
@@ -10,16 +10,17 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
-      .then(() => self.registration.unregister())
-      .then(() => self.clients.matchAll())
-      .then((clients) => {
-        clients.forEach((client) => {
-          if ('navigate' in client) {
-            client.navigate(client.url);
-          }
-        });
-      })
+      .then(() => self.clients.claim())
   );
+});
+
+// Listen for CLEAR_TENANT_CACHE messages sent on tenant switch or logout
+self.addEventListener('message', (event) => {
+  if (event.data && event.data.type === 'CLEAR_TENANT_CACHE') {
+    event.waitUntil(
+      caches.keys().then((keys) => Promise.all(keys.map((key) => caches.delete(key))))
+    );
+  }
 });
 
 self.addEventListener('fetch', (event) => {
@@ -42,6 +43,6 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Pass-through without local caching
+  // Pass-through network-first without caching sensitive responses
   event.respondWith(fetch(event.request));
 });
