@@ -200,7 +200,7 @@ export default function Page() {
   return (
     <div
       className="min-h-screen flex flex-col bg-background text-foreground"
-      style={{ ["--brand" as string]: t.brandColor }}
+      style={{ ["--brand" as string]: (!t.brandColor || t.brandColor === "#000000" || t.brandColor === "#000") ? "#0f766e" : t.brandColor }}
     >
       {/* Header */}
       <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/75">

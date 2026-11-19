@@ -789,7 +789,11 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
             >
               Cancel
             </Button>
-            <Button className="h-10 bg-[var(--brand)] text-white hover:opacity-90" disabled={booking} onClick={() => void submitBooking()}>
+            <Button
+              className="h-10 bg-[var(--brand,#0f766e)] text-white hover:opacity-90 shadow-sm"
+              disabled={booking}
+              onClick={() => void submitBooking()}
+            >
               {booking ? "Booking…" : "Book appointment"}
             </Button>
           </DialogFooter>
@@ -823,7 +827,11 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
             <Button variant="outline" className="h-10" onClick={() => setServiceDialogOpen(false)}>
               Cancel
             </Button>
-            <Button className="h-10 bg-[var(--brand)] text-white hover:opacity-90" disabled={savingService} onClick={() => void submitService()}>
+            <Button
+              className="h-10 bg-[var(--brand,#0f766e)] text-white hover:opacity-90 shadow-sm"
+              disabled={savingService}
+              onClick={() => void submitService()}
+            >
               {savingService ? "Adding…" : "Add service"}
             </Button>
           </DialogFooter>
@@ -862,7 +870,11 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
             <Button variant="outline" className="h-10" onClick={() => setStaffDialogOpen(false)}>
               Cancel
             </Button>
-            <Button className="h-10 bg-[var(--brand)] text-white hover:opacity-90" disabled={savingStaff} onClick={() => void submitStaff()}>
+            <Button
+              className="h-10 bg-[var(--brand,#0f766e)] text-white hover:opacity-90 shadow-sm"
+              disabled={savingStaff}
+              onClick={() => void submitStaff()}
+            >
               {savingStaff ? "Adding…" : "Add staff"}
             </Button>
           </DialogFooter>
