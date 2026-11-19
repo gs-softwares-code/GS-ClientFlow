@@ -117,6 +117,18 @@ function ClientFlowApp() {
     void bootstrap();
   }, [bootstrap]);
 
+  // Listen for brand updates dispatched by WhiteLabelView and merge them into ctx immediately
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const patch = (e as CustomEvent<Partial<TenantInfo>>).detail;
+      setCtx((prev) =>
+        prev ? { ...prev, tenant: { ...prev.tenant, ...patch } } : null
+      );
+    };
+    window.addEventListener("gscf:brand-updated", handler);
+    return () => window.removeEventListener("gscf:brand-updated", handler);
+  }, []);
+
   // Footer worker heartbeat
   useEffect(() => {
     if (!ctx) return;

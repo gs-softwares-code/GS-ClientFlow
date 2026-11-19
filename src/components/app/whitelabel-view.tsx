@@ -179,9 +179,19 @@ export default function WhiteLabelView({ ctx }: { ctx: AppCtx }) {
         section: "branding",
         patch: { name, brandColor: colorDraft, logoText: monogramDraft.trim().slice(0, 3) },
       });
+      // Propagate brand changes to the parent shell immediately (no page reload needed)
+      window.dispatchEvent(
+        new CustomEvent("gscf:brand-updated", {
+          detail: {
+            name,
+            brandColor: colorDraft,
+            logoText: monogramDraft.trim().slice(0, 3) || undefined,
+          },
+        })
+      );
       toast({
         title: "Brand saved",
-        description: "Visible across the app instantly — re-sign-in not required; the shell reads brand at session level.",
+        description: "Shell updated instantly — re-sign-in not required.",
       });
       await resync();
     } catch (err) {

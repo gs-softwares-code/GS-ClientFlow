@@ -810,7 +810,7 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="svc-name">Name</Label>
-              <Input id="svc-name" className="h-10" placeholder="e.g. Signature haircut" value={svcName} onChange={(e) => setSvcName(e.target.value)} />
+              <Input id="svc-name" className="h-10" placeholder="e.g. Signature haircut" value={svcName} onChange={(e) => setSvcName(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void submitService(); }} />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
@@ -823,16 +823,16 @@ export default function AppointmentsView({ ctx }: { ctx: AppCtx }) {
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" className="h-10" onClick={() => setServiceDialogOpen(false)}>
+          <DialogFooter className="flex-row gap-2 sm:flex-row">
+            <Button variant="outline" className="h-10 flex-1 sm:flex-none" onClick={() => setServiceDialogOpen(false)}>
               Cancel
             </Button>
             <Button
-              className="h-10 bg-[var(--brand,#0f766e)] text-white hover:opacity-90 shadow-sm"
+              className="h-10 flex-1 sm:flex-none bg-[var(--brand,#0f766e)] text-white hover:opacity-90 shadow-sm"
               disabled={savingService}
               onClick={() => void submitService()}
             >
-              {savingService ? "Adding…" : "Add service"}
+              {savingService ? "Adding…" : "Save service"}
             </Button>
           </DialogFooter>
         </DialogContent>
