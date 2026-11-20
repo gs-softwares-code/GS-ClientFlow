@@ -357,7 +357,8 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
               <CardDescription>Top point-holders — balances update as visit and feedback events land.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[420px] overflow-y-auto">
+              {/* Desktop Members Table */}
+              <div className="hidden md:block max-h-[420px] overflow-y-auto">
                 {accounts.length ? (
                   <Table>
                     <TableHeader>
@@ -418,6 +419,58 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
                   </p>
                 )}
               </div>
+
+              {/* Mobile Members Card Stack */}
+              <div className="block md:hidden p-3 space-y-2.5 max-h-[420px] overflow-y-auto">
+                {accounts.length ? (
+                  accounts.map((a) => (
+                    <Card key={`m-${a.id}`} className="p-3.5 space-y-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar className="h-9 w-9 shrink-0">
+                            <AvatarFallback className="bg-[var(--brand)]/10 text-xs font-semibold text-[var(--brand)]">
+                              {initials(a.name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{a.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">{a.email}</p>
+                          </div>
+                        </div>
+                        <Badge variant="secondary" className="font-semibold text-xs shrink-0">
+                          {a.pointsBalance} pts
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-muted-foreground pt-1 border-t">
+                        <span>{a.visitCount} visits</span>
+                        <span className="font-medium text-foreground">{formatINR(a.totalSpendCents)} spent</span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1">
+                        <Button variant="outline" size="sm" className="h-10 text-xs" onClick={() => openAdjust(a)}>
+                          Adjust Points
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-10 text-xs"
+                          onClick={() => {
+                            setRedeemTarget(a);
+                            setRedeemPoints("");
+                          }}
+                        >
+                          Redeem
+                        </Button>
+                      </div>
+                    </Card>
+                  ))
+                ) : (
+                  <p className="py-8 text-center text-xs text-muted-foreground">
+                    No loyalty members yet — members appear once customers start earning points.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -427,7 +480,8 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
               <CardDescription>Vouchers issued when members redeem points — valid for 90 days.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[280px] overflow-y-auto">
+              {/* Desktop Coupons Table */}
+              <div className="hidden md:block max-h-[280px] overflow-y-auto">
                 {coupons.length ? (
                   <Table>
                     <TableHeader>
@@ -470,6 +524,34 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
                   </p>
                 )}
               </div>
+
+              {/* Mobile Coupons Card Stack */}
+              <div className="block md:hidden p-3 space-y-2.5 max-h-[280px] overflow-y-auto">
+                {coupons.length ? (
+                  coupons.map((c) => {
+                    const badge = couponBadge(c.status);
+                    return (
+                      <Card key={`m-cp-${c.id}`} className="p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="font-mono text-xs font-semibold">{c.code}</span>
+                          <Badge variant={badge.variant} className={badge.className}>
+                            {c.status}
+                          </Badge>
+                        </div>
+                        <p className="text-xs font-medium truncate">{c.offer?.title ?? "Points voucher"}</p>
+                        <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t">
+                          <span>{c.customer?.name ?? "Unassigned"}</span>
+                          <span>{c.pointsCost === null ? "Free" : `−${c.pointsCost} pts`}</span>
+                        </div>
+                      </Card>
+                    );
+                  })
+                ) : (
+                  <p className="py-6 text-center text-xs text-muted-foreground">
+                    No coupons yet — run a redemption from a member row above.
+                  </p>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -484,7 +566,8 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
               <CardTitle className="text-base">Ledger — last {transactions.length} transactions</CardTitle>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[420px] overflow-y-auto">
+              {/* Desktop Transactions Table */}
+              <div className="hidden md:block max-h-[420px] overflow-y-auto">
                 {transactions.length ? (
                   <Table>
                     <TableHeader>
@@ -543,6 +626,39 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
                   <p className="py-12 text-center text-sm text-muted-foreground">No loyalty activity yet.</p>
                 )}
               </div>
+
+              {/* Mobile Transactions Card Stack */}
+              <div className="block md:hidden p-3 space-y-2.5 max-h-[420px] overflow-y-auto">
+                {transactions.length ? (
+                  transactions.map((t) => {
+                    const badge = kindBadge(t.kind);
+                    return (
+                      <Card key={`m-tx-${t.id}`} className="p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium truncate">{t.customer.name}</span>
+                          <span
+                            className={`font-semibold text-xs tabular-nums ${t.points >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-700 dark:text-rose-400"}`}
+                          >
+                            {t.points >= 0 ? `+${t.points}` : `${t.points}`} pts
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between gap-2">
+                          <Badge variant={badge.variant} className={badge.className}>
+                            {kindLabel(t.kind)}
+                          </Badge>
+                          <span className="text-[11px] text-muted-foreground">Balance: {t.balanceAfter}</span>
+                        </div>
+                        {t.reason && <p className="text-[11px] text-muted-foreground truncate">{t.reason}</p>}
+                        <div className="text-[10px] text-muted-foreground pt-1 border-t">
+                          {formatDateTime(t.createdAt)} ({timeAgo(t.createdAt)})
+                        </div>
+                      </Card>
+                    );
+                  })
+                ) : (
+                  <p className="py-8 text-center text-xs text-muted-foreground">No loyalty activity yet.</p>
+                )}
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -555,7 +671,8 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
               <CardDescription>Personal codes issued at registration, ranked by uses.</CardDescription>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="max-h-[420px] overflow-y-auto">
+              {/* Desktop Referrals Table */}
+              <div className="hidden md:block max-h-[420px] overflow-y-auto">
                 {referrals.length ? (
                   <Table>
                     <TableHeader>
@@ -577,6 +694,27 @@ export default function LoyaltyView({ ctx }: { ctx: AppCtx }) {
                   </Table>
                 ) : (
                   <p className="py-12 text-center text-sm text-muted-foreground">
+                    No referral codes yet — codes are issued as customers register.
+                  </p>
+                )}
+              </div>
+
+              {/* Mobile Referrals Card Stack */}
+              <div className="block md:hidden p-3 space-y-2 max-h-[420px] overflow-y-auto">
+                {referrals.length ? (
+                  referrals.map((r) => (
+                    <Card key={`m-ref-${r.code}`} className="p-3 flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-mono text-xs font-semibold">{r.code}</span>
+                        <p className="text-xs text-muted-foreground truncate">{r.customer.name}</p>
+                      </div>
+                      <Badge variant="secondary" className="text-xs shrink-0 font-semibold">
+                        {r.usesCount} uses
+                      </Badge>
+                    </Card>
+                  ))
+                ) : (
+                  <p className="py-8 text-center text-xs text-muted-foreground">
                     No referral codes yet — codes are issued as customers register.
                   </p>
                 )}

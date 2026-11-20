@@ -1099,18 +1099,19 @@ function MembershipLedgerTab({ ctx }: { ctx: AppCtx }) {
               No memberships match the selected filter.
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Member</TableHead>
-                  <TableHead>Plan</TableHead>
-                  <TableHead>Expiry Date</TableHead>
-                  <TableHead>Price</TableHead>
-                  <TableHead>Payment</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Member</TableHead>
+                    <TableHead>Plan</TableHead>
+                    <TableHead>Expiry Date</TableHead>
+                    <TableHead>Price</TableHead>
+                    <TableHead>Payment</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                 {filtered.map((m) => {
                   const expTime = new Date(m.expiryDate).getTime();
                   const diffDays = Math.round((expTime - now) / 86400_000);
@@ -1170,6 +1171,7 @@ function MembershipLedgerTab({ ctx }: { ctx: AppCtx }) {
                 })}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

@@ -354,64 +354,118 @@ function CampaignsTab({ ctx }: TabProps) {
           {!data ? (
             <Skeleton className="h-48 w-full" />
           ) : rows.length ? (
-            <div className="max-h-[420px] overflow-y-auto rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Campaign</TableHead>
-                    <TableHead>Channel</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Segment</TableHead>
-                    <TableHead className="text-right">Audience</TableHead>
-                    <TableHead className="w-[120px]">Delivery</TableHead>
-                    <TableHead className="w-[120px]">Read</TableHead>
-                    <TableHead className="text-right">Failed</TableHead>
-                    <TableHead className="text-right">Skipped</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {rows.map((c) => {
-                    const deliveryPct = c.total > 0 ? Math.round((c.delivered / c.total) * 100) : 0;
-                    const readPct = c.delivered > 0 ? Math.round((c.read / c.delivered) * 100) : 0;
-                    return (
-                      <TableRow key={c.id}>
-                        <TableCell className="font-medium">{c.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="secondary" className="text-[10px] capitalize">
-                            {c.channel}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={`text-[10px] capitalize ${campaignStatusClass(c.status)}`}>
-                            {c.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">{c.segmentName ?? "—"}</TableCell>
-                        <TableCell className="text-right tabular-nums">{c.total}</TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Progress value={deliveryPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
-                            <p className="text-[10px] text-muted-foreground">
-                              {deliveryPct}% of {c.total}
-                            </p>
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden md:block max-h-[420px] overflow-y-auto rounded-lg border">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Campaign</TableHead>
+                      <TableHead>Channel</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Segment</TableHead>
+                      <TableHead className="text-right">Audience</TableHead>
+                      <TableHead className="w-[120px]">Delivery</TableHead>
+                      <TableHead className="w-[120px]">Read</TableHead>
+                      <TableHead className="text-right">Failed</TableHead>
+                      <TableHead className="text-right">Skipped</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {rows.map((c) => {
+                      const deliveryPct = c.total > 0 ? Math.round((c.delivered / c.total) * 100) : 0;
+                      const readPct = c.delivered > 0 ? Math.round((c.read / c.delivered) * 100) : 0;
+                      return (
+                        <TableRow key={c.id}>
+                          <TableCell className="font-medium">{c.name}</TableCell>
+                          <TableCell>
+                            <Badge variant="secondary" className="text-[10px] capitalize">
+                              {c.channel}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`text-[10px] capitalize ${campaignStatusClass(c.status)}`}>
+                              {c.status}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground">{c.segmentName ?? "—"}</TableCell>
+                          <TableCell className="text-right tabular-nums">{c.total}</TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Progress value={deliveryPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
+                              <p className="text-[10px] text-muted-foreground">
+                                {deliveryPct}% of {c.total}
+                              </p>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="space-y-1">
+                              <Progress value={readPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
+                              <p className="text-[10px] text-muted-foreground">{readPct}% of delivered</p>
+                            </div>
+                          </TableCell>
+                          <TableCell className={`text-right tabular-nums ${c.failed > 0 ? "text-rose-600" : "text-muted-foreground"}`}>
+                            {c.failed}
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums text-muted-foreground">{c.skipped}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Mobile Card Stack */}
+              <div className="block md:hidden space-y-2.5 max-h-[420px] overflow-y-auto">
+                {rows.map((c) => {
+                  const deliveryPct = c.total > 0 ? Math.round((c.delivered / c.total) * 100) : 0;
+                  const readPct = c.delivered > 0 ? Math.round((c.read / c.delivered) * 100) : 0;
+                  return (
+                    <Card key={`m-${c.id}`} className="p-3.5 space-y-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-medium text-sm truncate">{c.name}</span>
+                        <Badge variant="outline" className={`text-[10px] capitalize shrink-0 ${campaignStatusClass(c.status)}`}>
+                          {c.status}
+                        </Badge>
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        <Badge variant="secondary" className="text-[10px] capitalize">
+                          {c.channel}
+                        </Badge>
+                        <span className="text-xs text-muted-foreground truncate">
+                          {c.segmentName ?? "All customers"} · {c.total} audience
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t text-xs">
+                        <div>
+                          <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                            <span>Delivered</span>
+                            <span className="font-medium text-foreground">{deliveryPct}%</span>
                           </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1">
-                            <Progress value={readPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
-                            <p className="text-[10px] text-muted-foreground">{readPct}% of delivered</p>
+                          <Progress value={deliveryPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
+                        </div>
+                        <div>
+                          <div className="flex justify-between text-[11px] text-muted-foreground mb-1">
+                            <span>Read</span>
+                            <span className="font-medium text-foreground">{readPct}%</span>
                           </div>
-                        </TableCell>
-                        <TableCell className={`text-right tabular-nums ${c.failed > 0 ? "text-rose-600" : "text-muted-foreground"}`}>
-                          {c.failed}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums text-muted-foreground">{c.skipped}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                          <Progress value={readPct} className="h-1.5 bg-muted/60 [&>div]:bg-[var(--brand)]" />
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-muted-foreground pt-1 border-t">
+                        <span className={c.failed > 0 ? "text-rose-600 font-medium" : ""}>
+                          {c.failed} failed
+                        </span>
+                        <span>{c.skipped} skipped</span>
+                      </div>
+                    </Card>
+                  );
+                })}
+              </div>
+            </>
           ) : (
             <EmptyNote text="No campaigns yet — schedule one from Campaigns & Offers." />
           )}

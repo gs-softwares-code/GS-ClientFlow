@@ -585,7 +585,7 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 text-xs border-blue-500/30 hover:bg-blue-500/10 text-blue-600"
+                      className="min-h-11 md:min-h-8 h-11 md:h-8 text-xs border-blue-500/30 hover:bg-blue-500/10 text-blue-600"
                       disabled={blueprintBusy === "coaching"}
                       onClick={() =>
                         deployBlueprint({
@@ -624,7 +624,7 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 text-xs border-rose-500/30 hover:bg-rose-500/10 text-rose-600"
+                      className="min-h-11 md:min-h-8 h-11 md:h-8 text-xs border-rose-500/30 hover:bg-rose-500/10 text-rose-600"
                       disabled={blueprintBusy === "gym"}
                       onClick={() =>
                         deployBlueprint({
@@ -663,7 +663,7 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-7 text-xs border-teal-500/30 hover:bg-teal-500/10 text-teal-600"
+                      className="min-h-11 md:min-h-8 h-11 md:h-8 text-xs border-teal-500/30 hover:bg-teal-500/10 text-teal-600"
                       disabled={blueprintBusy === "salon"}
                       onClick={() =>
                         deployBlueprint({
@@ -880,7 +880,7 @@ export default function AutomationView({ ctx }: { ctx: AppCtx }) {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 shrink-0 gap-1 text-xs"
+                            className="min-h-11 md:min-h-8 h-11 md:h-8 shrink-0 gap-1 text-xs"
                             disabled={retryBusyId === e.id}
                             onClick={() => void retryDead(e)}
                           >
